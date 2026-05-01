@@ -31,9 +31,8 @@ fn check_snapshot(name: &str, actual: &str) {
             path.display()
         );
     }
-    let expected = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!("failed to read snapshot {}: {e}", path.display())
-    });
+    let expected = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read snapshot {}: {e}", path.display()));
     assert_eq!(
         actual, expected,
         "snapshot drift for {name}; update tests/snapshots/{name} if the change is intentional"
@@ -72,8 +71,7 @@ fn components_yaml_golden_snapshot() {
         root: PathBuf::from("/repo/atlas"),
         generated_at: "2026-04-24T00:00:00Z".into(),
         cache_fingerprints: CacheFingerprints {
-            ontology_sha: "0000000000000000000000000000000000000000000000000000000000000001"
-                .into(),
+            ontology_sha: "0000000000000000000000000000000000000000000000000000000000000001".into(),
             prompt_shas: BTreeMap::from([
                 (
                     "classify".to_string(),

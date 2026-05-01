@@ -60,7 +60,10 @@ mod drift_tests {
     #[test]
     fn edge_kinds_in_yaml_and_rust_are_bijective() {
         let yaml: BTreeSet<String> = collect_yaml_kinds();
-        let rust: BTreeSet<String> = EdgeKind::all().iter().map(|k| k.as_str().to_string()).collect();
+        let rust: BTreeSet<String> = EdgeKind::all()
+            .iter()
+            .map(|k| k.as_str().to_string())
+            .collect();
 
         let missing_from_rust: Vec<_> = yaml.difference(&rust).cloned().collect();
         let missing_from_yaml: Vec<_> = rust.difference(&yaml).cloned().collect();

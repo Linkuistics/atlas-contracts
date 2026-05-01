@@ -29,7 +29,9 @@ pub fn load_components(path: &Path) -> Result<ComponentsFile> {
         file.schema_version,
         COMPONENTS_SCHEMA_VERSION,
         path,
-        FileFlavour::Generated { tool_step: "atlas index" },
+        FileFlavour::Generated {
+            tool_step: "atlas index",
+        },
     )?;
     Ok(file)
 }
@@ -42,8 +44,7 @@ pub fn load_or_default_components(path: &Path) -> Result<ComponentsFile> {
 }
 
 pub fn save_components_atomic(path: &Path, file: &ComponentsFile) -> Result<()> {
-    let yaml = serde_yaml::to_string(file)
-        .context("failed to serialise components.yaml")?;
+    let yaml = serde_yaml::to_string(file).context("failed to serialise components.yaml")?;
     write_atomic(path, yaml.as_bytes())
 }
 
@@ -72,8 +73,8 @@ pub fn load_or_default_overrides(path: &Path) -> Result<OverridesFile> {
 }
 
 pub fn save_overrides_atomic(path: &Path, file: &OverridesFile) -> Result<()> {
-    let yaml = serde_yaml::to_string(file)
-        .context("failed to serialise components.overrides.yaml")?;
+    let yaml =
+        serde_yaml::to_string(file).context("failed to serialise components.overrides.yaml")?;
     write_atomic(path, yaml.as_bytes())
 }
 
@@ -89,7 +90,9 @@ pub fn load_externals(path: &Path) -> Result<ExternalsFile> {
         file.schema_version,
         EXTERNALS_SCHEMA_VERSION,
         path,
-        FileFlavour::Generated { tool_step: "atlas index" },
+        FileFlavour::Generated {
+            tool_step: "atlas index",
+        },
     )?;
     Ok(file)
 }
@@ -102,8 +105,8 @@ pub fn load_or_default_externals(path: &Path) -> Result<ExternalsFile> {
 }
 
 pub fn save_externals_atomic(path: &Path, file: &ExternalsFile) -> Result<()> {
-    let yaml = serde_yaml::to_string(file)
-        .context("failed to serialise external-components.yaml")?;
+    let yaml =
+        serde_yaml::to_string(file).context("failed to serialise external-components.yaml")?;
     write_atomic(path, yaml.as_bytes())
 }
 
@@ -331,7 +334,10 @@ mod tests {
         let err = load_components(&path).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("schema_version"), "msg: {msg}");
-        assert!(msg.contains("atlas index"), "msg must point at the tool step: {msg}");
+        assert!(
+            msg.contains("atlas index"),
+            "msg must point at the tool step: {msg}"
+        );
     }
 
     #[test]

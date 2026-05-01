@@ -62,8 +62,8 @@ pub struct EvidenceGradeEntry {
 pub const EMBEDDED_ONTOLOGY_YAML: &str = include_str!("../../../defaults/ontology.yaml");
 
 pub fn parse(yaml: &str) -> Result<OntologyYaml> {
-    let parsed: OntologyYaml = serde_yaml::from_str(yaml)
-        .context("failed to parse ontology YAML")?;
+    let parsed: OntologyYaml =
+        serde_yaml::from_str(yaml).context("failed to parse ontology YAML")?;
     if parsed.schema_version != ONTOLOGY_FILE_SCHEMA_VERSION {
         anyhow::bail!(
             "ontology YAML schema_version is {}, expected {}",
@@ -101,7 +101,11 @@ pub fn render_kinds_for_prompt(ontology: &OntologyYaml) -> String {
             ));
             current_family = Some(kind.family.as_str());
         }
-        let direction = if kind.directed { "directed" } else { "symmetric" };
+        let direction = if kind.directed {
+            "directed"
+        } else {
+            "symmetric"
+        };
         let lifecycles = kind
             .lifecycles
             .iter()

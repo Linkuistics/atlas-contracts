@@ -198,7 +198,11 @@ impl EvidenceGrade {
     }
 
     pub fn all() -> &'static [EvidenceGrade] {
-        &[EvidenceGrade::Strong, EvidenceGrade::Medium, EvidenceGrade::Weak]
+        &[
+            EvidenceGrade::Strong,
+            EvidenceGrade::Medium,
+            EvidenceGrade::Weak,
+        ]
     }
 }
 
@@ -380,10 +384,7 @@ mod tests {
         // §6 lists exactly these two as symmetric; everything else is
         // directed. Pin that here so drift in the enum surfaces loudly.
         for kind in EdgeKind::all() {
-            let expected = !matches!(
-                kind,
-                EdgeKind::CommunicatesWith | EdgeKind::CoImplements
-            );
+            let expected = !matches!(kind, EdgeKind::CommunicatesWith | EdgeKind::CoImplements);
             assert_eq!(
                 kind.is_directed(),
                 expected,

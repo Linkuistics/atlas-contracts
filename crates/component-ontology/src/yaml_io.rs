@@ -32,8 +32,12 @@ pub fn load_or_default(path: &Path) -> Result<RelatedComponentsFile> {
 pub fn load(path: &Path) -> Result<RelatedComponentsFile> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    let file: RelatedComponentsFile = serde_yaml::from_str(&content)
-        .with_context(|| format!("failed to parse {} as related-components.yaml", path.display()))?;
+    let file: RelatedComponentsFile = serde_yaml::from_str(&content).with_context(|| {
+        format!(
+            "failed to parse {} as related-components.yaml",
+            path.display()
+        )
+    })?;
     if file.schema_version != SCHEMA_VERSION {
         bail!(
             "{} has schema_version {} but this component-ontology expects {}. \
@@ -56,8 +60,8 @@ pub fn load(path: &Path) -> Result<RelatedComponentsFile> {
 /// half-serialised file at `path`. Temp file sits alongside the target
 /// so the rename is on the same filesystem.
 pub fn save_atomic(path: &Path, file: &RelatedComponentsFile) -> Result<()> {
-    let yaml = serde_yaml::to_string(file)
-        .context("failed to serialise related-components to YAML")?;
+    let yaml =
+        serde_yaml::to_string(file).context("failed to serialise related-components to YAML")?;
     let parent = path
         .parent()
         .with_context(|| format!("{} has no parent directory", path.display()))?;
@@ -124,8 +128,14 @@ mod tests {
         std::fs::write(&path, "schema_version: 1\nedges: []\n").unwrap();
         let err = load(&path).unwrap_err();
         let msg = format!("{err:#}");
-        assert!(msg.contains("schema_version"), "error must mention the version key: {msg}");
-        assert!(msg.contains("discover"), "error must point at the regenerate path: {msg}");
+        assert!(
+            msg.contains("schema_version"),
+            "error must mention the version key: {msg}"
+        );
+        assert!(
+            msg.contains("discover"),
+            "error must point at the regenerate path: {msg}"
+        );
     }
 
     #[test]

@@ -61,12 +61,22 @@ pub fn rename_match(input: RenameMatchInput<'_>) -> RenameMatchOutput {
     let prior_sha_sets: Vec<HashSet<&str>> = input
         .prior
         .iter()
-        .map(|e| e.path_segments.iter().map(|p| p.content_sha.as_str()).collect())
+        .map(|e| {
+            e.path_segments
+                .iter()
+                .map(|p| p.content_sha.as_str())
+                .collect()
+        })
         .collect();
     let candidate_sha_sets: Vec<HashSet<&str>> = input
         .new_candidates
         .iter()
-        .map(|e| e.path_segments.iter().map(|p| p.content_sha.as_str()).collect())
+        .map(|e| {
+            e.path_segments
+                .iter()
+                .map(|p| p.content_sha.as_str())
+                .collect()
+        })
         .collect();
 
     let mut matches: Vec<(usize, usize)> = Vec::new();
@@ -169,9 +179,7 @@ mod tests {
         // Prior {a,b,c,d} ∩ cand {a,b,x} = {a,b} → 2/4 = 0.5 < 0.69.
         let prior = vec![entry_with_shas("p", &["a", "b", "c", "d"])];
         let new = vec![entry_with_shas("c", &["a", "b", "x"])];
-        let out = rename_match(
-            RenameMatchInput::new(&prior, &new).with_threshold(0.69),
-        );
+        let out = rename_match(RenameMatchInput::new(&prior, &new).with_threshold(0.69));
         assert!(out.matches.is_empty());
         assert_eq!(out.orphans, vec![0]);
         assert_eq!(out.fresh, vec![0]);
@@ -182,22 +190,25 @@ mod tests {
         // Prior {a,b,c} ∩ cand {a,b,c,x,y,z} = 3/3 = 1.0 ≥ 0.71.
         let prior = vec![entry_with_shas("p", &["a", "b", "c"])];
         let new = vec![entry_with_shas("c", &["a", "b", "c", "x", "y", "z"])];
-        let out = rename_match(
-            RenameMatchInput::new(&prior, &new).with_threshold(0.71),
-        );
+        let out = rename_match(RenameMatchInput::new(&prior, &new).with_threshold(0.71));
         assert_eq!(out.matches, vec![(0, 0)]);
     }
 
     #[test]
     fn boundary_exact_threshold_matches() {
         // Overlap must be *at least* the threshold: 0.70 exactly matches.
-        let prior = vec![entry_with_shas("p", &["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"])];
+        let prior = vec![entry_with_shas(
+            "p",
+            &["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"],
+        )];
         // 7/10 = 0.70 exactly.
         let new = vec![entry_with_shas("c", &["a", "b", "c", "d", "e", "f", "g"])];
-        let out = rename_match(
-            RenameMatchInput::new(&prior, &new).with_threshold(0.70),
+        let out = rename_match(RenameMatchInput::new(&prior, &new).with_threshold(0.70));
+        assert_eq!(
+            out.matches,
+            vec![(0, 0)],
+            "0.70 must match at threshold 0.70"
         );
-        assert_eq!(out.matches, vec![(0, 0)], "0.70 must match at threshold 0.70");
     }
 
     #[test]
@@ -275,10 +286,7 @@ mod tests {
     #[test]
     fn empty_prior_yields_all_fresh() {
         let prior: Vec<ComponentEntry> = vec![];
-        let new = vec![
-            entry_with_shas("c0", &["a"]),
-            entry_with_shas("c1", &["b"]),
-        ];
+        let new = vec![entry_with_shas("c0", &["a"]), entry_with_shas("c1", &["b"])];
         let out = rename_match(RenameMatchInput::new(&prior, &new));
         assert!(out.matches.is_empty());
         assert!(out.orphans.is_empty());
@@ -287,10 +295,7 @@ mod tests {
 
     #[test]
     fn empty_candidates_yields_all_orphans() {
-        let prior = vec![
-            entry_with_shas("p0", &["a"]),
-            entry_with_shas("p1", &["b"]),
-        ];
+        let prior = vec![entry_with_shas("p0", &["a"]), entry_with_shas("p1", &["b"])];
         let new: Vec<ComponentEntry> = vec![];
         let out = rename_match(RenameMatchInput::new(&prior, &new));
         assert!(out.matches.is_empty());
