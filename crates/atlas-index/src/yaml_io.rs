@@ -1,24 +1,26 @@
-//! Load / save helpers for the three Atlas-owned YAMLs.
+//! Load / save helpers for the five Atlas-owned YAMLs.
 //!
-//! Three pairs of functions — `load_components` / `save_components_atomic`,
-//! and analogues for overrides and externals. `load_or_default_*` returns
-//! the schema-default when the file is absent; the strict `load_*` errors
-//! out if absent.
+//! Five pairs of functions — `load_components` / `save_components_atomic`
+//! and analogues for overrides, externals, subsystems, and subsystems
+//! overrides. `load_or_default_*` returns the schema-default when the
+//! file is absent; the strict `load_*` errors out if absent.
 //!
 //! Schema-version mismatch is a hard error. The error message differs
-//! between generated and user-authored files: for `components.yaml` and
-//! `external-components.yaml` the user is directed to delete and re-run
-//! the tool; for `components.overrides.yaml` the user is pointed at the
-//! migration docs because deleting their hand-authored pins is never the
-//! right answer.
+//! between generated and user-authored files: generated files
+//! (`components.yaml`, `external-components.yaml`, `subsystems.yaml`)
+//! tell the user to delete and re-run the tool; user-authored files
+//! (`components.overrides.yaml`, `subsystems.overrides.yaml`) point at
+//! the migration docs because deleting hand-authored content is never
+//! the right answer.
 
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
 use super::schema::{
-    ComponentsFile, ExternalsFile, OverridesFile, COMPONENTS_SCHEMA_VERSION,
-    EXTERNALS_SCHEMA_VERSION, OVERRIDES_SCHEMA_VERSION,
+    ComponentsFile, ExternalsFile, OverridesFile, SubsystemsFile, SubsystemsOverridesFile,
+    COMPONENTS_SCHEMA_VERSION, EXTERNALS_SCHEMA_VERSION, OVERRIDES_SCHEMA_VERSION,
+    SUBSYSTEMS_OVERRIDES_SCHEMA_VERSION, SUBSYSTEMS_SCHEMA_VERSION,
 };
 
 pub fn load_components(path: &Path) -> Result<ComponentsFile> {
@@ -110,6 +112,63 @@ pub fn save_externals_atomic(path: &Path, file: &ExternalsFile) -> Result<()> {
     write_atomic(path, yaml.as_bytes())
 }
 
+pub fn load_subsystems_overrides(path: &Path) -> Result<SubsystemsOverridesFile> {
+    let content = read_to_string(path)?;
+    let file: SubsystemsOverridesFile = serde_yaml::from_str(&content).with_context(|| {
+        format!(
+            "failed to parse {} as subsystems.overrides.yaml",
+            path.display()
+        )
+    })?;
+    require_schema_version(
+        file.schema_version,
+        SUBSYSTEMS_OVERRIDES_SCHEMA_VERSION,
+        path,
+        FileFlavour::UserAuthored,
+    )?;
+    Ok(file)
+}
+
+pub fn load_or_default_subsystems_overrides(path: &Path) -> Result<SubsystemsOverridesFile> {
+    if !path.exists() {
+        return Ok(SubsystemsOverridesFile::default());
+    }
+    load_subsystems_overrides(path)
+}
+
+pub fn save_subsystems_overrides_atomic(path: &Path, file: &SubsystemsOverridesFile) -> Result<()> {
+    let yaml =
+        serde_yaml::to_string(file).context("failed to serialise subsystems.overrides.yaml")?;
+    write_atomic(path, yaml.as_bytes())
+}
+
+pub fn load_subsystems(path: &Path) -> Result<SubsystemsFile> {
+    let content = read_to_string(path)?;
+    let file: SubsystemsFile = serde_yaml::from_str(&content)
+        .with_context(|| format!("failed to parse {} as subsystems.yaml", path.display()))?;
+    require_schema_version(
+        file.schema_version,
+        SUBSYSTEMS_SCHEMA_VERSION,
+        path,
+        FileFlavour::Generated {
+            tool_step: "atlas index",
+        },
+    )?;
+    Ok(file)
+}
+
+pub fn load_or_default_subsystems(path: &Path) -> Result<SubsystemsFile> {
+    if !path.exists() {
+        return Ok(SubsystemsFile::default());
+    }
+    load_subsystems(path)
+}
+
+pub fn save_subsystems_atomic(path: &Path, file: &SubsystemsFile) -> Result<()> {
+    let yaml = serde_yaml::to_string(file).context("failed to serialise subsystems.yaml")?;
+    write_atomic(path, yaml.as_bytes())
+}
+
 fn read_to_string(path: &Path) -> Result<String> {
     std::fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))
 }
@@ -182,8 +241,9 @@ mod tests {
 
     use super::super::schema::{
         AlwaysTrue, CacheFingerprints, ComponentEntry, ComponentsFile, DocAnchor, ExternalEntry,
-        ExternalsFile, OverridesFile, PathSegment, PinValue, COMPONENTS_SCHEMA_VERSION,
-        EXTERNALS_SCHEMA_VERSION, OVERRIDES_SCHEMA_VERSION,
+        ExternalsFile, OverridesFile, PathSegment, PinValue, SubsystemOverride, SubsystemsFile,
+        SubsystemsOverridesFile, COMPONENTS_SCHEMA_VERSION, EXTERNALS_SCHEMA_VERSION,
+        OVERRIDES_SCHEMA_VERSION, SUBSYSTEMS_OVERRIDES_SCHEMA_VERSION, SUBSYSTEMS_SCHEMA_VERSION,
     };
     use super::*;
 
@@ -386,5 +446,92 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let err = load_components(&tmp.path().join("nope.yaml")).unwrap_err();
         assert!(format!("{err:#}").contains("failed to read"));
+    }
+
+    fn sample_subsystems_overrides_file() -> SubsystemsOverridesFile {
+        SubsystemsOverridesFile {
+            schema_version: SUBSYSTEMS_OVERRIDES_SCHEMA_VERSION,
+            subsystems: vec![SubsystemOverride {
+                id: "auth".into(),
+                members: vec!["services/auth/*".into(), "identity-core".into()],
+                role: Some("identity".into()),
+                lifecycle_roles: vec![],
+                rationale: "x".into(),
+                evidence_grade: EvidenceGrade::Strong,
+                evidence_fields: vec![],
+            }],
+        }
+    }
+
+    fn sample_subsystems_file() -> SubsystemsFile {
+        SubsystemsFile {
+            schema_version: SUBSYSTEMS_SCHEMA_VERSION,
+            generated_at: "2026-05-01T00:00:00Z".into(),
+            subsystems: vec![],
+        }
+    }
+
+    #[test]
+    fn subsystems_overrides_save_then_load_round_trips() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("subsystems.overrides.yaml");
+        let original = sample_subsystems_overrides_file();
+        save_subsystems_overrides_atomic(&path, &original).unwrap();
+        let loaded = load_subsystems_overrides(&path).unwrap();
+        assert_eq!(loaded, original);
+    }
+
+    #[test]
+    fn subsystems_save_then_load_round_trips() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("subsystems.yaml");
+        let original = sample_subsystems_file();
+        save_subsystems_atomic(&path, &original).unwrap();
+        let loaded = load_subsystems(&path).unwrap();
+        assert_eq!(loaded, original);
+    }
+
+    #[test]
+    fn load_or_default_subsystems_overrides_returns_default_when_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("subsystems.overrides.yaml");
+        let loaded = load_or_default_subsystems_overrides(&path).unwrap();
+        assert_eq!(loaded, SubsystemsOverridesFile::default());
+    }
+
+    #[test]
+    fn load_or_default_subsystems_returns_default_when_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("subsystems.yaml");
+        let loaded = load_or_default_subsystems(&path).unwrap();
+        assert_eq!(loaded, SubsystemsFile::default());
+    }
+
+    #[test]
+    fn subsystems_overrides_load_rejects_wrong_schema_version_user_authored() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("subsystems.overrides.yaml");
+        std::fs::write(&path, "schema_version: 999\nsubsystems: []\n").unwrap();
+        let err = load_subsystems_overrides(&path).unwrap_err().to_string();
+        assert!(
+            err.contains("user-authored") && err.contains("Do NOT delete"),
+            "expected user-authored migration hint, got: {err}"
+        );
+    }
+
+    #[test]
+    fn subsystems_load_rejects_wrong_schema_version_with_regenerate_hint() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("subsystems.yaml");
+        std::fs::write(
+            &path,
+            "schema_version: 999\ngenerated_at: ''\nsubsystems: []\n",
+        )
+        .unwrap();
+        let err = load_subsystems(&path).unwrap_err().to_string();
+        assert!(
+            err.contains("delete the file") && err.contains("atlas index"),
+            "expected regenerate hint, got: {err}"
+        );
     }
 }

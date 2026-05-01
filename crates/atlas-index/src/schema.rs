@@ -1,12 +1,13 @@
-//! Types for the four YAMLs that sit at the Atlas/Ravel-Lite boundary:
+//! Types for the six YAMLs that sit at the Atlas/Ravel-Lite boundary:
 //! `components.yaml`, `components.overrides.yaml`,
-//! `external-components.yaml`, and `related-components.yaml`.
+//! `external-components.yaml`, `subsystems.yaml`,
+//! `subsystems.overrides.yaml`, and `related-components.yaml`.
 //!
-//! The first three are owned by this crate. The fourth is owned by
-//! `component-ontology` and re-exported here so consumers only need one
-//! crate. Each generated file carries its own `schema_version` —
-//! independent versions let us evolve one file without forcing a reader
-//! to relearn all four at once.
+//! All but the last are owned by this crate. `related-components.yaml`
+//! is owned by `component-ontology` and re-exported here so consumers
+//! only need one crate. Each generated file carries its own
+//! `schema_version` — independent versions let us evolve one file
+//! without forcing a reader to relearn all six at once.
 //!
 //! `kind`, `role`, `language`, and `build_system` are kept as `String`
 //! at this layer. The typed `ComponentKind` enum lands in `atlas-engine`
@@ -23,6 +24,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub const COMPONENTS_SCHEMA_VERSION: u32 = 1;
 pub const OVERRIDES_SCHEMA_VERSION: u32 = 1;
 pub const EXTERNALS_SCHEMA_VERSION: u32 = 1;
+pub const SUBSYSTEMS_OVERRIDES_SCHEMA_VERSION: u32 = 1;
+pub const SUBSYSTEMS_SCHEMA_VERSION: u32 = 1;
 
 /// Fingerprint set written into `components.yaml` so a second tool run
 /// can detect whether any cache-invalidating input changed. `prompt_shas`
@@ -181,6 +184,91 @@ impl Default for OverridesFile {
     }
 }
 
+/// Hand-authored subsystem boundary. Lives in `subsystems.overrides.yaml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubsystemOverride {
+    pub id: String,
+    /// Mixed glob and id forms. A `members` entry containing `/` or `*`
+    /// is matched against component path segments; otherwise it is
+    /// matched against component id directly. See the design spec for
+    /// the resolution algorithm.
+    #[serde(default)]
+    pub members: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub lifecycle_roles: Vec<LifecycleScope>,
+    pub rationale: String,
+    pub evidence_grade: EvidenceGrade,
+    #[serde(default)]
+    pub evidence_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubsystemsOverridesFile {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub subsystems: Vec<SubsystemOverride>,
+}
+
+impl Default for SubsystemsOverridesFile {
+    fn default() -> Self {
+        SubsystemsOverridesFile {
+            schema_version: SUBSYSTEMS_OVERRIDES_SCHEMA_VERSION,
+            subsystems: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemberEvidence {
+    pub id: String,
+    /// Glob string when the member resolved via a glob, the literal
+    /// `"id"` when the member entry was an id form, or
+    /// `"<glob> (no matches)"` when a glob produced zero matches.
+    pub matched_via: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubsystemEntry {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub lifecycle_roles: Vec<LifecycleScope>,
+    pub rationale: String,
+    pub evidence_grade: EvidenceGrade,
+    #[serde(default)]
+    pub evidence_fields: Vec<String>,
+    /// Resolved component ids, sorted and deduped.
+    #[serde(default)]
+    pub members: Vec<String>,
+    /// Audit trail: how each resolved member was matched.
+    #[serde(default)]
+    pub member_evidence: Vec<MemberEvidence>,
+    /// Soft warnings about this subsystem (e.g. `"all members unresolved"`).
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubsystemsFile {
+    pub schema_version: u32,
+    pub generated_at: String,
+    #[serde(default)]
+    pub subsystems: Vec<SubsystemEntry>,
+}
+
+impl Default for SubsystemsFile {
+    fn default() -> Self {
+        SubsystemsFile {
+            schema_version: SUBSYSTEMS_SCHEMA_VERSION,
+            generated_at: String::new(),
+            subsystems: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExternalEntry {
     pub id: String,
@@ -329,6 +417,94 @@ mod tests {
         let yaml = serde_yaml::to_string(&entry).unwrap();
         let parsed: ComponentEntry = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, entry);
+    }
+
+    #[test]
+    fn subsystems_overrides_file_default_has_current_schema_version() {
+        let f = SubsystemsOverridesFile::default();
+        assert_eq!(f.schema_version, SUBSYSTEMS_OVERRIDES_SCHEMA_VERSION);
+        assert!(f.subsystems.is_empty());
+    }
+
+    #[test]
+    fn subsystem_override_round_trips_through_yaml() {
+        let s = SubsystemOverride {
+            id: "auth".into(),
+            members: vec!["services/auth/*".into(), "identity-core".into()],
+            role: Some("identity-and-authorisation".into()),
+            lifecycle_roles: vec![LifecycleScope::Runtime],
+            rationale: "owns all session/token surfaces".into(),
+            evidence_grade: EvidenceGrade::Strong,
+            evidence_fields: vec![],
+        };
+        let yaml = serde_yaml::to_string(&s).unwrap();
+        let parsed: SubsystemOverride = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, s);
+    }
+
+    #[test]
+    fn subsystems_overrides_file_round_trips_through_yaml() {
+        let f = SubsystemsOverridesFile {
+            schema_version: SUBSYSTEMS_OVERRIDES_SCHEMA_VERSION,
+            subsystems: vec![SubsystemOverride {
+                id: "auth".into(),
+                members: vec!["libs/identity".into()],
+                role: None,
+                lifecycle_roles: vec![],
+                rationale: "x".into(),
+                evidence_grade: EvidenceGrade::Strong,
+                evidence_fields: vec![],
+            }],
+        };
+        let yaml = serde_yaml::to_string(&f).unwrap();
+        let parsed: SubsystemsOverridesFile = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, f);
+    }
+
+    #[test]
+    fn subsystems_file_default_has_current_schema_version() {
+        let f = SubsystemsFile::default();
+        assert_eq!(f.schema_version, SUBSYSTEMS_SCHEMA_VERSION);
+        assert!(f.subsystems.is_empty());
+        assert!(f.generated_at.is_empty());
+    }
+
+    #[test]
+    fn subsystem_entry_round_trips_through_yaml() {
+        let e = SubsystemEntry {
+            id: "auth".into(),
+            role: Some("identity".into()),
+            lifecycle_roles: vec![LifecycleScope::Runtime],
+            rationale: "x".into(),
+            evidence_grade: EvidenceGrade::Strong,
+            evidence_fields: vec![],
+            members: vec!["auth-service".into(), "identity-lib".into()],
+            member_evidence: vec![
+                MemberEvidence {
+                    id: "auth-service".into(),
+                    matched_via: "services/auth/*".into(),
+                },
+                MemberEvidence {
+                    id: "identity-lib".into(),
+                    matched_via: "libs/identity".into(),
+                },
+            ],
+            notes: vec![],
+        };
+        let yaml = serde_yaml::to_string(&e).unwrap();
+        let parsed: SubsystemEntry = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, e);
+    }
+
+    #[test]
+    fn member_evidence_round_trips_through_yaml() {
+        let m = MemberEvidence {
+            id: "x-component".into(),
+            matched_via: "id".into(),
+        };
+        let yaml = serde_yaml::to_string(&m).unwrap();
+        let parsed: MemberEvidence = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, m);
     }
 
     #[test]

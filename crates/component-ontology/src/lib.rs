@@ -24,7 +24,8 @@ pub use defaults::{
     ONTOLOGY_FILE_SCHEMA_VERSION,
 };
 pub use schema::{
-    Edge, EdgeKind, EvidenceGrade, LifecycleScope, RelatedComponentsFile, SCHEMA_VERSION,
+    validate_participant_namespace, Edge, EdgeKind, EvidenceGrade, LifecycleScope,
+    RelatedComponentsFile, SCHEMA_VERSION,
 };
 pub use yaml_io::{load, load_or_default, save_atomic};
 

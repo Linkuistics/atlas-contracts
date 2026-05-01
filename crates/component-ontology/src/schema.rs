@@ -333,6 +333,27 @@ impl RelatedComponentsFile {
     }
 }
 
+/// Verify that no id appears in both component and subsystem namespaces.
+/// Edge participants (`Edge::participants: Vec<String>`) are opaque
+/// strings; collision-free namespaces guarantee unambiguous resolution.
+///
+/// Returns the sorted set of colliding ids, if any.
+pub fn validate_participant_namespace(
+    components: &std::collections::BTreeSet<&str>,
+    subsystems: &std::collections::BTreeSet<&str>,
+) -> Result<(), Vec<String>> {
+    let mut collisions: Vec<String> = components
+        .intersection(subsystems)
+        .map(|s| (*s).to_string())
+        .collect();
+    if collisions.is_empty() {
+        Ok(())
+    } else {
+        collisions.sort();
+        Err(collisions)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,6 +614,36 @@ mod tests {
         let yaml = serde_yaml::to_string(&original).unwrap();
         let parsed: Edge = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn validate_participant_namespace_passes_when_disjoint() {
+        let components: std::collections::BTreeSet<&str> =
+            ["auth-service", "storage"].iter().copied().collect();
+        let subsystems: std::collections::BTreeSet<&str> =
+            ["auth", "storage-system"].iter().copied().collect();
+        let result = validate_participant_namespace(&components, &subsystems);
+        assert!(result.is_ok(), "expected no collisions, got {result:?}");
+    }
+
+    #[test]
+    fn validate_participant_namespace_reports_collisions() {
+        let components: std::collections::BTreeSet<&str> =
+            ["auth", "storage"].iter().copied().collect();
+        let subsystems: std::collections::BTreeSet<&str> =
+            ["auth", "metrics"].iter().copied().collect();
+        let err = validate_participant_namespace(&components, &subsystems).unwrap_err();
+        assert_eq!(err, vec!["auth"]);
+    }
+
+    #[test]
+    fn validate_participant_namespace_handles_multiple_collisions_sorted() {
+        let components: std::collections::BTreeSet<&str> =
+            ["alpha", "beta", "delta"].iter().copied().collect();
+        let subsystems: std::collections::BTreeSet<&str> =
+            ["delta", "alpha"].iter().copied().collect();
+        let err = validate_participant_namespace(&components, &subsystems).unwrap_err();
+        assert_eq!(err, vec!["alpha", "delta"]);
     }
 
     #[test]
