@@ -1,15 +1,13 @@
 schema_version: 1
 pins:
   atlas:
-    deleted:
-      suppress: true
+    deleted: true
     role:
       value: spec
       reason: hand-curated docs repo
     suppress_children:
-      suppress_children:
-      - atlas/old-crate
-      - atlas/older-crate
+    - atlas/old-crate
+    - atlas/older-crate
 additions:
 - id: atlas/component-ontology
   parent: atlas

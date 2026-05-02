@@ -16,9 +16,12 @@
 //! vocabulary grows.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::PathBuf;
 
 use component_ontology::{EvidenceGrade, LifecycleScope};
+use serde::de::{MapAccess, SeqAccess, Visitor};
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub const COMPONENTS_SCHEMA_VERSION: u32 = 1;
@@ -110,16 +113,17 @@ impl Default for ComponentsFile {
 
 /// Pin value for `components.overrides.yaml`.
 ///
-/// The variants are discriminated by field name rather than a type tag
-/// so a hand-written override file reads naturally. Serde tries the
-/// variants in declaration order; `Suppress` and `SuppressChildren`
-/// precede `Value` because `Value`'s single required field (`value`)
-/// would otherwise greedily accept inputs like `{suppress: true}` (no
-/// `value` field; fails) after already reading through the more
-/// distinctive fields. In practice each variant is uniquely identified
-/// by its key, so the ordering is defensive rather than load-bearing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
+/// Carries hand-written guidance for one slot in a component's pin map.
+/// `Value` overrides a classification field (kind, role, language, …);
+/// `Suppress` removes the component entirely; `SuppressChildren` prunes
+/// specific children of the component.
+///
+/// On the wire, each variant accepts a natural form (a map for `Value`,
+/// a bool for `Suppress`, a sequence for `SuppressChildren`) plus, for
+/// `Suppress` and `SuppressChildren` only, a legacy doubly-nested map
+/// form left over from when the enum used `#[serde(untagged)]` field-name
+/// dispatch. Output (`Serialize`) is always the natural form.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinValue {
     Suppress {
         suppress: AlwaysTrue,
@@ -129,7 +133,6 @@ pub enum PinValue {
     },
     Value {
         value: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
 }
@@ -156,6 +159,146 @@ impl<'de> Deserialize<'de> for AlwaysTrue {
             ));
         }
         Ok(AlwaysTrue)
+    }
+}
+
+impl Serialize for PinValue {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            PinValue::Suppress { .. } => serializer.serialize_bool(true),
+            PinValue::SuppressChildren { suppress_children } => {
+                suppress_children.serialize(serializer)
+            }
+            PinValue::Value { value, reason } => {
+                let len = if reason.is_some() { 2 } else { 1 };
+                let mut map = serializer.serialize_map(Some(len))?;
+                map.serialize_entry("value", value)?;
+                if let Some(r) = reason {
+                    map.serialize_entry("reason", r)?;
+                }
+                map.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PinValue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(PinValueVisitor)
+    }
+}
+
+struct PinValueVisitor;
+
+impl<'de> Visitor<'de> for PinValueVisitor {
+    type Value = PinValue;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(
+            "a pin value: `true` to suppress the component, a sequence of child ids \
+             to suppress specific children, or a `{value, reason?}` map to override a field",
+        )
+    }
+
+    fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+        if !v {
+            return Err(E::custom(
+                "`suppress: false` is not meaningful; remove the pin instead",
+            ));
+        }
+        Ok(PinValue::Suppress {
+            suppress: AlwaysTrue,
+        })
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut items: Vec<String> = Vec::new();
+        while let Some(item) = seq.next_element::<String>()? {
+            items.push(item);
+        }
+        Ok(PinValue::SuppressChildren {
+            suppress_children: items,
+        })
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let first_key: Option<String> = map.next_key()?;
+        match first_key.as_deref() {
+            Some("value") => {
+                let value: String = map.next_value()?;
+                let mut reason: Option<String> = None;
+                while let Some(k) = map.next_key::<String>()? {
+                    match k.as_str() {
+                        "reason" => reason = Some(map.next_value()?),
+                        other => {
+                            return Err(serde::de::Error::unknown_field(
+                                other,
+                                &["value", "reason"],
+                            ));
+                        }
+                    }
+                }
+                Ok(PinValue::Value { value, reason })
+            }
+            Some("reason") => {
+                // Field order is not guaranteed when YAML is round-tripped through
+                // serde data models; accept {reason, value} too.
+                let reason: String = map.next_value()?;
+                let mut value: Option<String> = None;
+                while let Some(k) = map.next_key::<String>()? {
+                    match k.as_str() {
+                        "value" => value = Some(map.next_value()?),
+                        other => {
+                            return Err(serde::de::Error::unknown_field(
+                                other,
+                                &["value", "reason"],
+                            ));
+                        }
+                    }
+                }
+                let value = value.ok_or_else(|| serde::de::Error::missing_field("value"))?;
+                Ok(PinValue::Value {
+                    value,
+                    reason: Some(reason),
+                })
+            }
+            // Legacy doubly-nested form: `suppress: { suppress: true }` was the only
+            // accepted shape before this enum gained custom (de)serialise impls. Still
+            // accepted on input because pre-existing override files in the wild may use
+            // it; output always emits the natural single-nested form.
+            Some("suppress") => {
+                let v: bool = map.next_value()?;
+                if !v {
+                    return Err(serde::de::Error::custom(
+                        "`suppress: false` is not meaningful; remove the pin instead",
+                    ));
+                }
+                if map.next_key::<String>()?.is_some() {
+                    return Err(serde::de::Error::custom(
+                        "`suppress` pin accepts only a single `suppress: true` field",
+                    ));
+                }
+                Ok(PinValue::Suppress {
+                    suppress: AlwaysTrue,
+                })
+            }
+            Some("suppress_children") => {
+                let children: Vec<String> = map.next_value()?;
+                if map.next_key::<String>()?.is_some() {
+                    return Err(serde::de::Error::custom(
+                        "`suppress_children` pin accepts only a single `suppress_children: [...]` field",
+                    ));
+                }
+                Ok(PinValue::SuppressChildren {
+                    suppress_children: children,
+                })
+            }
+            None => Err(serde::de::Error::custom("empty pin value")),
+            Some(other) => Err(serde::de::Error::custom(format!(
+                "unknown pin value field `{other}`; expected `value` (with optional `reason`), \
+                 a bool, or a sequence of child ids"
+            ))),
+        }
     }
 }
 
@@ -337,37 +480,102 @@ mod tests {
     }
 
     #[test]
-    fn pin_value_suppress_variant_round_trips() {
+    fn pin_value_suppress_serialises_as_bare_true() {
         let pin = PinValue::Suppress {
             suppress: AlwaysTrue,
         };
         let yaml = serde_yaml::to_string(&pin).unwrap();
-        assert!(yaml.contains("suppress: true"), "got:\n{yaml}");
+        assert_eq!(yaml.trim(), "true", "got:\n{yaml}");
         let parsed: PinValue = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, pin);
     }
 
     #[test]
-    fn pin_value_suppress_children_variant_round_trips() {
+    fn pin_value_suppress_accepts_legacy_doubly_nested_form() {
+        let pin: PinValue = serde_yaml::from_str("suppress: true").unwrap();
+        assert_eq!(
+            pin,
+            PinValue::Suppress {
+                suppress: AlwaysTrue
+            }
+        );
+    }
+
+    #[test]
+    fn pin_value_suppress_children_serialises_as_bare_sequence() {
         let pin = PinValue::SuppressChildren {
             suppress_children: vec!["a".into(), "b".into()],
         };
         let yaml = serde_yaml::to_string(&pin).unwrap();
+        // Natural form: a YAML sequence at the root, no `suppress_children:` wrapper.
+        assert!(!yaml.contains("suppress_children"), "got:\n{yaml}");
+        assert!(yaml.contains("- a"), "got:\n{yaml}");
+        assert!(yaml.contains("- b"), "got:\n{yaml}");
         let parsed: PinValue = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, pin);
     }
 
     #[test]
-    fn pin_value_suppress_rejects_false() {
-        let err = serde_yaml::from_str::<PinValue>("suppress: false").unwrap_err();
-        let msg = err.to_string();
-        // untagged enum wraps the inner error; the specific "remove the
-        // pin instead" hint comes from our AlwaysTrue impl.
+    fn pin_value_suppress_children_accepts_natural_inline_sequence() {
+        // Reported user form: `suppress_children: [a, b]` written as the inner-map
+        // value. The PinValue deserialiser sees only the value side (`[a, b]`).
+        let pin: PinValue = serde_yaml::from_str("[a, b]").unwrap();
+        assert_eq!(
+            pin,
+            PinValue::SuppressChildren {
+                suppress_children: vec!["a".into(), "b".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn pin_value_suppress_children_accepts_legacy_doubly_nested_form() {
+        let pin: PinValue = serde_yaml::from_str("suppress_children:\n- a\n- b\n").unwrap();
+        assert_eq!(
+            pin,
+            PinValue::SuppressChildren {
+                suppress_children: vec!["a".into(), "b".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn pin_value_suppress_rejects_bare_false() {
+        let err = serde_yaml::from_str::<PinValue>("false").unwrap_err();
         assert!(
-            msg.contains("data did not match")
-                || msg.contains("not meaningful")
-                || msg.contains("untagged"),
-            "unexpected error: {msg}"
+            err.to_string().contains("not meaningful"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn pin_value_suppress_rejects_legacy_false() {
+        let err = serde_yaml::from_str::<PinValue>("suppress: false").unwrap_err();
+        assert!(
+            err.to_string().contains("not meaningful"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn pin_value_value_variant_with_only_value_serialises_compactly() {
+        let pin = PinValue::Value {
+            value: "rust-library".into(),
+            reason: None,
+        };
+        let yaml = serde_yaml::to_string(&pin).unwrap();
+        assert!(yaml.contains("value: rust-library"), "got:\n{yaml}");
+        assert!(!yaml.contains("reason"), "got:\n{yaml}");
+    }
+
+    #[test]
+    fn pin_value_value_variant_unknown_field_is_rejected() {
+        // A typo like `valeu:` lands us in the "unknown field" branch rather
+        // than silently degrading to a different variant.
+        let err = serde_yaml::from_str::<PinValue>("valeu: rust-library").unwrap_err();
+        assert!(
+            err.to_string().contains("unknown pin value field"),
+            "unexpected error: {err}"
         );
     }
 

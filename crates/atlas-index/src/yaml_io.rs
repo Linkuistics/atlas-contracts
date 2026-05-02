@@ -348,6 +348,38 @@ mod tests {
     }
 
     #[test]
+    fn overrides_load_accepts_natural_inline_suppress_children_form() {
+        // Reported user file shape: `suppress_children: [<id>, ...]` written
+        // directly under a pin entry, alongside `kind`, `language`, `role` pins.
+        // Before custom (de)serialise impls landed on PinValue, this produced
+        // "data did not match any variant of untagged enum PinValue".
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("components.overrides.yaml");
+        std::fs::write(
+            &path,
+            "schema_version: 1\n\
+             pins:\n  \
+               connector-lib:\n    \
+                 kind: { value: rust-library, reason: \"top-level crate\" }\n    \
+                 language: { value: rust }\n    \
+                 role: { value: connector-core }\n    \
+                 suppress_children: [connector-lib/formats]\n",
+        )
+        .unwrap();
+        let loaded = load_overrides(&path).unwrap();
+        let connector_pins = loaded.pins.get("connector-lib").expect("pin entry present");
+        match connector_pins.get("suppress_children") {
+            Some(PinValue::SuppressChildren { suppress_children }) => {
+                assert_eq!(
+                    suppress_children,
+                    &vec!["connector-lib/formats".to_string()]
+                );
+            }
+            other => panic!("expected SuppressChildren, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn externals_save_then_load_round_trips() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("external-components.yaml");
