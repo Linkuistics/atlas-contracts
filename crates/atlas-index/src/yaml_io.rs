@@ -282,6 +282,7 @@ mod tests {
                 prompt_shas: BTreeMap::from([("classify".to_string(), "4567".to_string())]),
                 model_id: "claude-opus-4-7".into(),
                 backend_version: "claude-cli 1.0.0".into(),
+                analyzer_registry_sha: "89ab".into(),
             },
             components: vec![sample_component_entry()],
         }

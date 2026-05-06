@@ -9,6 +9,7 @@ cache_fingerprints:
     stage1-surface: '0000000000000000000000000000000000000000000000000000000000000003'
   model_id: claude-opus-4-7
   backend_version: claude-cli 1.0.0
+  analyzer_registry_sha: '0000000000000000000000000000000000000000000000000000000000000004'
 components:
 - id: atlas/component-ontology
   parent: atlas

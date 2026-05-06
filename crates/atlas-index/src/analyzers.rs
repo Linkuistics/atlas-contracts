@@ -24,7 +24,7 @@ pub const ANALYZERS_SCHEMA_VERSION: u32 = 1;
 /// match the wire form used in `analyzers.yaml` (see design §6.6).
 /// `kebab-case` reduces to lowercase here because each variant is a
 /// single token without internal word breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Stage {
     L1,
@@ -527,5 +527,33 @@ version: 0.4.1
         assert_eq!(f.schema_version, ANALYZERS_SCHEMA_VERSION);
         assert!(f.analyzers.is_empty());
         assert!(f.config.is_empty());
+    }
+
+    #[test]
+    fn stage_total_ordering_matches_declaration_order() {
+        // PR-5 adds `PartialOrd + Ord` to `Stage`; downstream
+        // `BTreeSet<(Stage, _)>` uses depend on this. The total order
+        // is the variant declaration order: L1 < L2 < ... < L9.
+        let stages = [
+            Stage::L1,
+            Stage::L2,
+            Stage::L3,
+            Stage::L4,
+            Stage::L5,
+            Stage::L6,
+            Stage::L7,
+            Stage::L8,
+            Stage::L9,
+        ];
+        for window in stages.windows(2) {
+            assert!(window[0] < window[1], "stage ord: {:?}", window);
+        }
+        // Bonus: BTreeSet round-trip preserves the ordering.
+        let mut set = std::collections::BTreeSet::new();
+        for s in stages {
+            set.insert(s);
+        }
+        let sorted: Vec<_> = set.into_iter().collect();
+        assert_eq!(sorted, stages);
     }
 }

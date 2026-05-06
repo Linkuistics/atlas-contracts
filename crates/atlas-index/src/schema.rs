@@ -34,6 +34,18 @@ pub const SUBSYSTEMS_SCHEMA_VERSION: u32 = 1;
 /// can detect whether any cache-invalidating input changed. `prompt_shas`
 /// is keyed by prompt id (e.g., `"classify"`, `"stage1-surface"`); all
 /// SHAs are stored as lowercase hex strings to keep the YAML diffable.
+///
+/// `analyzer_registry_sha` is the canonical sha256 of the merged
+/// [`crate::analyzers::AnalyzersFile`] (built-in defaults plus any
+/// per-workspace overrides). It is computed as
+/// `sha256(serde_yaml::to_string(&analyzers_file).as_bytes())` rendered
+/// as 64-character lowercase hex, and contributes to L3+ stage cache
+/// keys per design §8.1 — a registry shape change invalidates every
+/// downstream cache entry automatically. The field is
+/// `#[serde(default)]` so prior on-disk YAML written before PR-5 still
+/// parses (the legacy value is the empty string, which differs from the
+/// hash of any non-empty registry and therefore correctly forces a
+/// recompute on first run after upgrade).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheFingerprints {
     pub ontology_sha: String,
@@ -41,6 +53,12 @@ pub struct CacheFingerprints {
     pub prompt_shas: BTreeMap<String, String>,
     pub model_id: String,
     pub backend_version: String,
+    /// Sha256 hex of the canonical YAML rendering of the merged
+    /// [`crate::analyzers::AnalyzersFile`]. Empty in records written
+    /// before PR-5; non-empty going forward. See the type-level
+    /// docstring for the exact computation.
+    #[serde(default)]
+    pub analyzer_registry_sha: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -755,6 +773,41 @@ mod tests {
         let parsed: ComponentsFile = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, f);
         assert_eq!(parsed.roots.len(), 2);
+    }
+
+    #[test]
+    fn cache_fingerprints_round_trip_includes_analyzer_registry_sha() {
+        // The new `analyzer_registry_sha` field (PR-5) is part of every
+        // record going forward; this round-trip pins the wire form.
+        let original = CacheFingerprints {
+            ontology_sha: "ont".into(),
+            prompt_shas: BTreeMap::from([("classify".to_string(), "psh".to_string())]),
+            model_id: "model".into(),
+            backend_version: "bv".into(),
+            analyzer_registry_sha: "ars".into(),
+        };
+        let yaml = serde_yaml::to_string(&original).unwrap();
+        assert!(yaml.contains("analyzer_registry_sha: ars"), "got:\n{yaml}");
+        let parsed: CacheFingerprints = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn cache_fingerprints_default_has_empty_analyzer_registry_sha() {
+        let f = CacheFingerprints::default();
+        assert!(f.analyzer_registry_sha.is_empty());
+    }
+
+    #[test]
+    fn cache_fingerprints_loads_legacy_record_without_analyzer_registry_sha() {
+        // A pre-PR-5 record on disk omits `analyzer_registry_sha`; the
+        // `#[serde(default)]` attribute keeps it parseable. The value
+        // is the empty string, which differs from the hash of any
+        // non-empty registry and so triggers a recompute on first run
+        // after upgrade.
+        let yaml = "ontology_sha: o\nmodel_id: m\nbackend_version: bv\n";
+        let parsed: CacheFingerprints = serde_yaml::from_str(yaml).unwrap();
+        assert!(parsed.analyzer_registry_sha.is_empty());
     }
 
     #[test]

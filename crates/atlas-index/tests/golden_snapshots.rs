@@ -84,6 +84,8 @@ fn components_yaml_golden_snapshot() {
             ]),
             model_id: "claude-opus-4-7".into(),
             backend_version: "claude-cli 1.0.0".into(),
+            analyzer_registry_sha:
+                "0000000000000000000000000000000000000000000000000000000000000004".into(),
         },
         components: vec![sample_component_entry()],
     };
