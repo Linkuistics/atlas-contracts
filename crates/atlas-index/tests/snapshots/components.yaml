@@ -1,5 +1,6 @@
 schema_version: 1
-root: /repo/atlas
+roots:
+- /repo/atlas
 generated_at: 2026-04-24T00:00:00Z
 cache_fingerprints:
   ontology_sha: '0000000000000000000000000000000000000000000000000000000000000001'
@@ -15,7 +16,8 @@ components:
   lifecycle_roles:
   - build
   - design
-  language: rust
+  languages:
+  - rust
   build_system: cargo
   role: library
   path_segments:

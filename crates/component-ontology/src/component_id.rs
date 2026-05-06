@@ -56,11 +56,16 @@ impl ComponentId {
     }
 
     pub fn leaf(&self) -> &str {
-        self.0.rsplit('/').next().expect("non-empty by construction")
+        self.0
+            .rsplit('/')
+            .next()
+            .expect("non-empty by construction")
     }
 
     pub fn parent(&self) -> Option<ComponentId> {
-        self.0.rfind('/').map(|i| ComponentId(self.0[..i].to_string()))
+        self.0
+            .rfind('/')
+            .map(|i| ComponentId(self.0[..i].to_string()))
     }
 
     pub fn child(&self, leaf: &str) -> Result<ComponentId, ComponentIdError> {

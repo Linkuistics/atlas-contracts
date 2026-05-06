@@ -1,21 +1,33 @@
-//! Schema and reader for the six Atlas YAMLs
+//! Schema and reader for the Atlas YAMLs
 //! (`components.yaml`, `components.overrides.yaml`,
 //! `external-components.yaml`, `subsystems.yaml`,
-//! `subsystems.overrides.yaml`, `related-components.yaml`);
+//! `subsystems.overrides.yaml`, `related-components.yaml`,
+//! plus the Atlas vNext additions `surfaces.yaml`, `analyzers.yaml`,
+//! `config.yaml`, and `<component-path>/.atlas/component.yaml`);
 //! rename-matching for identifier stability across runs.
 //!
 //! `related-components.yaml` lives in the `component-ontology` crate
 //! and is re-exported here so consumers need only one dependency.
 //!
 //! The crate deliberately depends on nothing heavy — no Salsa, no
-//! async runtime, no LLM. A host tool (Ravel-Lite after migration M5,
-//! any future consumer) can pull in just this crate and read/write the
-//! six files without transitive weight.
+//! async runtime, no LLM. A host tool (Ravel-Lite, any future
+//! consumer) can pull in just this crate and read/write the
+//! files without transitive weight.
 
+pub mod analyzers;
+pub mod config;
+pub mod per_component;
 pub mod rename_match;
 pub mod schema;
+pub mod surfaces;
 pub mod yaml_io;
 
+pub use analyzers::{
+    AnalyzerSpec, AnalyzersFile, ApplicabilityPredicate, Confidence, CostClass, Stage, Transport,
+    ANALYZERS_SCHEMA_VERSION,
+};
+pub use config::{AtlasConfigFile, ModelRouting, CONFIG_SCHEMA_VERSION};
+pub use per_component::{PerComponentFile, PER_COMPONENT_SCHEMA_VERSION};
 pub use rename_match::{
     rename_match, RenameMatchInput, RenameMatchOutput, DEFAULT_RENAME_MATCH_THRESHOLD,
 };
@@ -25,6 +37,10 @@ pub use schema::{
     SubsystemOverride, SubsystemsFile, SubsystemsOverridesFile, COMPONENTS_SCHEMA_VERSION,
     EXTERNALS_SCHEMA_VERSION, OVERRIDES_SCHEMA_VERSION, SUBSYSTEMS_OVERRIDES_SCHEMA_VERSION,
     SUBSYSTEMS_SCHEMA_VERSION,
+};
+pub use surfaces::{
+    Binding, BindingRole, ConsumedContract, Contract, ContractKind, ImplementedContract,
+    LibraryApi, PubItem, PubItemKind, SurfacesFile, SURFACES_SCHEMA_VERSION,
 };
 pub use yaml_io::{
     load_components, load_externals, load_or_default_components, load_or_default_externals,

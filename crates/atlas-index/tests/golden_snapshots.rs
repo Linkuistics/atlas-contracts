@@ -7,7 +7,7 @@
 //! accidental renaming of a `serde(rename_all)` attribute — fails the
 //! assertion with a diff, forcing an explicit update.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use atlas_index::{
@@ -45,7 +45,7 @@ fn sample_component_entry() -> ComponentEntry {
         parent: Some(ComponentId::parse("atlas").unwrap()),
         kind: "rust-library".into(),
         lifecycle_roles: vec![LifecycleScope::Build, LifecycleScope::Design],
-        language: Some("rust".into()),
+        languages: BTreeSet::from(["rust".to_string()]),
         build_system: Some("cargo".into()),
         role: Some("library".into()),
         path_segments: vec![PathSegment {
@@ -68,7 +68,7 @@ fn sample_component_entry() -> ComponentEntry {
 fn components_yaml_golden_snapshot() {
     let file = ComponentsFile {
         schema_version: COMPONENTS_SCHEMA_VERSION,
-        root: PathBuf::from("/repo/atlas"),
+        roots: vec![PathBuf::from("/repo/atlas")],
         generated_at: "2026-04-24T00:00:00Z".into(),
         cache_fingerprints: CacheFingerprints {
             ontology_sha: "0000000000000000000000000000000000000000000000000000000000000001".into(),

@@ -15,7 +15,7 @@
 //! enum here would churn every downstream consumer every time the
 //! vocabulary grows.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::PathBuf;
 
@@ -45,7 +45,8 @@ pub struct CacheFingerprints {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathSegment {
-    /// Relative to `ComponentsFile::root`.
+    /// Relative to one of `ComponentsFile::roots`. The component's
+    /// id namespace identifies which root.
     pub path: PathBuf,
     /// Hex-encoded SHA256 of the directory tree at `path`. Rename-match
     /// compares prior vs. new segments by this value (see
@@ -55,12 +56,26 @@ pub struct PathSegment {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocAnchor {
-    /// Relative to `ComponentsFile::root`.
+    /// Relative to one of `ComponentsFile::roots`.
     pub path: PathBuf,
     /// ATX heading text (no leading `#` marks).
     pub heading: String,
 }
 
+/// One entry in `components.yaml` (and the projected
+/// `<component-path>/.atlas/component.yaml`).
+///
+/// Atlas vNext makes two structural breaks against v1:
+///
+/// 1. `language: Option<String>` becomes `languages: BTreeSet<String>` —
+///    a polyglot component carries every language in one record
+///    (design §3.1).
+/// 2. The `kind` vocabulary expands beyond source-code kinds with
+///    deliverable kinds (`docker-image`, `published-crate`,
+///    `helm-release`, `k8s-deployment`, `homebrew-bottle`,
+///    `orchestration-script`, `ci-pipeline`). The wire form remains
+///    `String` at this layer; the typed `ComponentKind` enum in
+///    atlas-engine carries the closed vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentEntry {
     pub id: ComponentId,
@@ -69,8 +84,12 @@ pub struct ComponentEntry {
     pub kind: String,
     #[serde(default)]
     pub lifecycle_roles: Vec<LifecycleScope>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub language: Option<String>,
+    /// Set of programming languages this component contains. Empty
+    /// for deliverables whose source is purely declarative (e.g.
+    /// `kind: docker-image`). `BTreeSet` to keep YAML output
+    /// deterministic.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub languages: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build_system: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,10 +108,23 @@ pub struct ComponentEntry {
     pub deleted: bool,
 }
 
+/// Top-level `components.yaml` envelope.
+///
+/// Atlas vNext replaces v1's singular `root: PathBuf` with a plural
+/// `roots: Vec<PathBuf>` so multi-root workspaces (path-dep-walked
+/// peer roots, design §5.3) record every analysed root in the same
+/// record. The first entry is conventionally the primary root —
+/// the directory `atlas index` was invoked from — but the schema
+/// does not enforce that; consumers that need the primary root read
+/// it from `config.yaml` (see `config::AtlasConfigFile`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentsFile {
     pub schema_version: u32,
-    pub root: PathBuf,
+    /// Discovered roots, primary first. Atlas vNext drops the v1
+    /// `root: PathBuf` field; consumers expecting it must read this
+    /// list instead.
+    #[serde(default)]
+    pub roots: Vec<PathBuf>,
     pub generated_at: String,
     pub cache_fingerprints: CacheFingerprints,
     #[serde(default)]
@@ -103,7 +135,7 @@ impl Default for ComponentsFile {
     fn default() -> Self {
         ComponentsFile {
             schema_version: COMPONENTS_SCHEMA_VERSION,
-            root: PathBuf::new(),
+            roots: Vec::new(),
             generated_at: String::new(),
             cache_fingerprints: CacheFingerprints::default(),
             components: Vec::new(),
@@ -622,7 +654,7 @@ mod tests {
             parent: Some(ComponentId::parse("workspace").unwrap()),
             kind: "rust-library".into(),
             lifecycle_roles: vec![LifecycleScope::Build, LifecycleScope::Runtime],
-            language: Some("rust".into()),
+            languages: BTreeSet::from(["rust".to_string()]),
             build_system: Some("cargo".into()),
             role: Some("library".into()),
             path_segments: vec![PathSegment {
@@ -642,6 +674,87 @@ mod tests {
         let yaml = serde_yaml::to_string(&entry).unwrap();
         let parsed: ComponentEntry = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, entry);
+    }
+
+    #[test]
+    fn component_entry_polyglot_languages_round_trip() {
+        let entry = ComponentEntry {
+            id: ComponentId::parse("workspace/billing-service").unwrap(),
+            parent: None,
+            kind: "rust-binary".into(),
+            lifecycle_roles: vec![LifecycleScope::Runtime],
+            languages: BTreeSet::from(["rust".to_string(), "c".to_string(), "python".to_string()]),
+            build_system: Some("cargo".into()),
+            role: None,
+            path_segments: vec![],
+            manifests: vec![],
+            doc_anchors: vec![],
+            evidence_grade: EvidenceGrade::Strong,
+            evidence_fields: vec!["Cargo.toml".into()],
+            rationale: "polyglot service".into(),
+            deleted: false,
+        };
+        let yaml = serde_yaml::to_string(&entry).unwrap();
+        let parsed: ComponentEntry = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, entry);
+        assert_eq!(parsed.languages.len(), 3);
+    }
+
+    #[test]
+    fn component_entry_deliverable_kind_serialises_as_kebab_case_string() {
+        // The `kind` field is a string at this layer (the typed
+        // `ComponentKind` enum lives in atlas-engine). Confirm a
+        // deliverable kind round-trips so consumers can write
+        // `docker-image`, `published-crate`, etc., without a schema
+        // bump.
+        for kind in [
+            "docker-image",
+            "published-crate",
+            "helm-release",
+            "k8s-deployment",
+            "homebrew-bottle",
+            "orchestration-script",
+            "ci-pipeline",
+        ] {
+            let entry = ComponentEntry {
+                id: ComponentId::parse("workspace/deliverable").unwrap(),
+                parent: None,
+                kind: kind.into(),
+                lifecycle_roles: vec![LifecycleScope::Deploy],
+                languages: BTreeSet::new(),
+                build_system: None,
+                role: None,
+                path_segments: vec![],
+                manifests: vec![],
+                doc_anchors: vec![],
+                evidence_grade: EvidenceGrade::Strong,
+                evidence_fields: vec!["Dockerfile".into()],
+                rationale: "deliverable".into(),
+                deleted: false,
+            };
+            let yaml = serde_yaml::to_string(&entry).unwrap();
+            assert!(yaml.contains(&format!("kind: {kind}")), "got:\n{yaml}");
+            let parsed: ComponentEntry = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(parsed, entry);
+        }
+    }
+
+    #[test]
+    fn components_file_round_trips_through_yaml_with_multi_root() {
+        let f = ComponentsFile {
+            schema_version: COMPONENTS_SCHEMA_VERSION,
+            roots: vec![
+                PathBuf::from("/Users/antony/Development/Ravel-Lite"),
+                PathBuf::from("/Users/antony/Development/atlas-contracts"),
+            ],
+            generated_at: "2026-05-06T07:12:12Z".into(),
+            cache_fingerprints: CacheFingerprints::default(),
+            components: vec![],
+        };
+        let yaml = serde_yaml::to_string(&f).unwrap();
+        let parsed: ComponentsFile = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, f);
+        assert_eq!(parsed.roots.len(), 2);
     }
 
     #[test]

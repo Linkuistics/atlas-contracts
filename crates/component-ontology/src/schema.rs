@@ -42,6 +42,31 @@ pub enum EdgeKind {
     ConformsTo,
     CoImplements,
     Describes,
+    // Contract family (Atlas vNext §3.6).
+    /// Component → contract: this component is the contract owner.
+    DefinesContract,
+    /// Component → contract: this component supplies a binding for
+    /// the contract in its language.
+    ImplementsContract,
+    /// Component → contract: this component reads/writes through a
+    /// binding to the contract.
+    ConsumesContract,
+    // Composition family (Atlas vNext §3.5).
+    /// Source-component → deliverable: source artefact is bundled
+    /// into the deliverable (e.g. Dockerfile COPY).
+    BundledInto,
+    /// Source-component → deliverable: source is published to a
+    /// registry as the deliverable.
+    PublishedAs,
+    /// Component ↔ component: two components co-deploy via shared
+    /// deliverable, network, volume, or env. Symmetric.
+    DeployedWith,
+    /// Component ↔ component: two components are version-locked in
+    /// a coordinated release. Symmetric.
+    ReleasedWith,
+    /// External-package → deliverable: a non-source-tree package
+    /// (e.g. a base Docker image) contributes to the deliverable.
+    BundledFromExternal,
 }
 
 impl EdgeKind {
@@ -49,7 +74,13 @@ impl EdgeKind {
     /// directed kinds preserve the semantic order defined in §6.
     /// Matches the `directed` column in `defaults/ontology.yaml`.
     pub fn is_directed(self) -> bool {
-        !matches!(self, EdgeKind::CommunicatesWith | EdgeKind::CoImplements)
+        !matches!(
+            self,
+            EdgeKind::CommunicatesWith
+                | EdgeKind::CoImplements
+                | EdgeKind::DeployedWith
+                | EdgeKind::ReleasedWith
+        )
     }
 
     pub fn as_str(self) -> &'static str {
@@ -71,6 +102,14 @@ impl EdgeKind {
             EdgeKind::ConformsTo => "conforms-to",
             EdgeKind::CoImplements => "co-implements",
             EdgeKind::Describes => "describes",
+            EdgeKind::DefinesContract => "defines-contract",
+            EdgeKind::ImplementsContract => "implements-contract",
+            EdgeKind::ConsumesContract => "consumes-contract",
+            EdgeKind::BundledInto => "bundled-into",
+            EdgeKind::PublishedAs => "published-as",
+            EdgeKind::DeployedWith => "deployed-with",
+            EdgeKind::ReleasedWith => "released-with",
+            EdgeKind::BundledFromExternal => "bundled-from-external",
         }
     }
 
@@ -93,6 +132,14 @@ impl EdgeKind {
             "conforms-to" => EdgeKind::ConformsTo,
             "co-implements" => EdgeKind::CoImplements,
             "describes" => EdgeKind::Describes,
+            "defines-contract" => EdgeKind::DefinesContract,
+            "implements-contract" => EdgeKind::ImplementsContract,
+            "consumes-contract" => EdgeKind::ConsumesContract,
+            "bundled-into" => EdgeKind::BundledInto,
+            "published-as" => EdgeKind::PublishedAs,
+            "deployed-with" => EdgeKind::DeployedWith,
+            "released-with" => EdgeKind::ReleasedWith,
+            "bundled-from-external" => EdgeKind::BundledFromExternal,
             _ => return None,
         })
     }
@@ -116,6 +163,14 @@ impl EdgeKind {
             EdgeKind::ConformsTo,
             EdgeKind::CoImplements,
             EdgeKind::Describes,
+            EdgeKind::DefinesContract,
+            EdgeKind::ImplementsContract,
+            EdgeKind::ConsumesContract,
+            EdgeKind::BundledInto,
+            EdgeKind::PublishedAs,
+            EdgeKind::DeployedWith,
+            EdgeKind::ReleasedWith,
+            EdgeKind::BundledFromExternal,
         ]
     }
 }
@@ -402,14 +457,21 @@ mod tests {
 
     #[test]
     fn is_directed_agrees_with_spec_table() {
-        // §6 lists exactly these two as symmetric; everything else is
-        // directed. Pin that here so drift in the enum surfaces loudly.
+        // §6 + Atlas vNext §3.5 list exactly these as symmetric;
+        // everything else is directed. Pin that here so drift in the
+        // enum surfaces loudly.
         for kind in EdgeKind::all() {
-            let expected = !matches!(kind, EdgeKind::CommunicatesWith | EdgeKind::CoImplements);
+            let expected = !matches!(
+                kind,
+                EdgeKind::CommunicatesWith
+                    | EdgeKind::CoImplements
+                    | EdgeKind::DeployedWith
+                    | EdgeKind::ReleasedWith
+            );
             assert_eq!(
                 kind.is_directed(),
                 expected,
-                "direction for {} diverged from §6",
+                "direction for {} diverged from §6 / vNext §3.5",
                 kind.as_str()
             );
         }

@@ -233,7 +233,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
 
     use component_ontology::{ComponentId, EvidenceGrade, LifecycleScope};
@@ -253,7 +253,7 @@ mod tests {
             parent: None,
             kind: "workspace".into(),
             lifecycle_roles: vec![LifecycleScope::Build],
-            language: Some("rust".into()),
+            languages: BTreeSet::from(["rust".to_string()]),
             build_system: Some("cargo".into()),
             role: None,
             path_segments: vec![PathSegment {
@@ -275,7 +275,7 @@ mod tests {
     fn sample_components_file() -> ComponentsFile {
         ComponentsFile {
             schema_version: COMPONENTS_SCHEMA_VERSION,
-            root: PathBuf::from("/tmp/target"),
+            roots: vec![PathBuf::from("/tmp/target")],
             generated_at: "2026-04-24T00:00:00Z".into(),
             cache_fingerprints: CacheFingerprints {
                 ontology_sha: "0123".into(),
@@ -426,7 +426,7 @@ mod tests {
         let path = tmp.path().join("components.yaml");
         std::fs::write(
             &path,
-            "schema_version: 99\nroot: /tmp\ngenerated_at: ''\ncache_fingerprints: {ontology_sha: '', model_id: '', backend_version: ''}\ncomponents: []\n",
+            "schema_version: 99\nroots: [/tmp]\ngenerated_at: ''\ncache_fingerprints: {ontology_sha: '', model_id: '', backend_version: ''}\ncomponents: []\n",
         )
         .unwrap();
         let err = load_components(&path).unwrap_err();

@@ -15,7 +15,8 @@ additions:
   lifecycle_roles:
   - build
   - design
-  language: rust
+  languages:
+  - rust
   build_system: cargo
   role: library
   path_segments:
