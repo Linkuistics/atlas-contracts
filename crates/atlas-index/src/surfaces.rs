@@ -184,7 +184,10 @@ pub struct LibraryApi {
     /// Stable id (e.g. `atlas-contracts/atlas-index/public-api`).
     pub id: String,
     /// Always `library-api`. Carried explicitly so the YAML is
-    /// self-describing without context.
+    /// self-describing without context. The invariant
+    /// `kind == ContractKind::LibraryApi` is enforced by
+    /// [`LibraryApi::validate`]; callers should call it before
+    /// serialising.
     pub kind: ContractKind,
     /// Programming language this surface is bound to. `library-api`
     /// contracts are per-language by construction.
@@ -193,6 +196,40 @@ pub struct LibraryApi {
     pub fingerprint: String,
     #[serde(default)]
     pub pub_items: Vec<PubItem>,
+}
+
+/// Reason a [`LibraryApi`] can be semantically inconsistent.
+/// The on-disk schema permits the inconsistency to be expressed
+/// (`kind:` is a public field of the closed [`ContractKind`] enum);
+/// validation is a runtime check on top of `serde`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LibraryApiValidationError {
+    /// `LibraryApi.kind` is not [`ContractKind::LibraryApi`]. The
+    /// observed kind is carried so error renderers can name it.
+    WrongKind { actual: ContractKind },
+}
+
+impl std::fmt::Display for LibraryApiValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WrongKind { actual } => {
+                write!(f, "LibraryApi.kind must be `library-api`, got `{actual:?}`")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LibraryApiValidationError {}
+
+impl LibraryApi {
+    /// Enforce the doc-comment invariant that `kind` is always
+    /// [`ContractKind::LibraryApi`]. Call before serialising.
+    pub fn validate(&self) -> Result<(), LibraryApiValidationError> {
+        if self.kind != ContractKind::LibraryApi {
+            return Err(LibraryApiValidationError::WrongKind { actual: self.kind });
+        }
+        Ok(())
+    }
 }
 
 /// Top-level shape of `<component-path>/.atlas/surfaces.yaml`.
@@ -362,6 +399,20 @@ description: |
         let reemitted = serde_yaml::to_string(&parsed).unwrap();
         let reparsed: Contract = serde_yaml::from_str(&reemitted).unwrap();
         assert_eq!(reparsed, parsed);
+        // Pin the load-bearing field names from design §6.3 so a
+        // future serde rename drifting away from the wire form trips
+        // here rather than slipping through the round-trip identity.
+        for field in [
+            "definition_binding:",
+            "fingerprint:",
+            "content_sha:",
+            "span:",
+        ] {
+            assert!(
+                reemitted.contains(field),
+                "design §6.3 field `{field}` missing from re-emitted YAML:\n{reemitted}"
+            );
+        }
     }
 
     #[test]
@@ -378,6 +429,29 @@ description: |
         let yaml = serde_yaml::to_string(&original).unwrap();
         let parsed: LibraryApi = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn library_api_validate_accepts_library_api_kind() {
+        sample_library_api().validate().unwrap();
+    }
+
+    #[test]
+    fn library_api_validate_rejects_other_kinds() {
+        for wrong in [
+            ContractKind::DataFormat,
+            ContractKind::WireProtocol,
+            ContractKind::FilesystemLayout,
+            ContractKind::ProcessInterface,
+            ContractKind::EnvironmentNamespace,
+        ] {
+            let mut api = sample_library_api();
+            api.kind = wrong;
+            assert_eq!(
+                api.validate().unwrap_err(),
+                LibraryApiValidationError::WrongKind { actual: wrong }
+            );
+        }
     }
 
     #[test]

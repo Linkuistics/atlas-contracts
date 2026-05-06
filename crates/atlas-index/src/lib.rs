@@ -40,7 +40,8 @@ pub use schema::{
 };
 pub use surfaces::{
     Binding, BindingRole, ConsumedContract, Contract, ContractKind, ImplementedContract,
-    LibraryApi, PubItem, PubItemKind, SurfacesFile, SURFACES_SCHEMA_VERSION,
+    LibraryApi, LibraryApiValidationError, PubItem, PubItemKind, SurfacesFile,
+    SURFACES_SCHEMA_VERSION,
 };
 pub use yaml_io::{
     load_components, load_externals, load_or_default_components, load_or_default_externals,

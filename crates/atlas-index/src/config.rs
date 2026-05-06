@@ -50,7 +50,7 @@ pub struct AtlasConfigFile {
     /// Discovered roots, including the primary root and every
     /// peer-root reached via path-dep walking (design §5.3, §6.7).
     /// Phase 1 writes them in iteration order; future PRs may sort.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roots: Vec<PathBuf>,
     /// Per-stage LLM routing. The map keys are stage names —
     /// `"classify"`, `"surface"`, `"edges"`, `"subcarve"` etc. —
@@ -150,5 +150,20 @@ mod tests {
         assert!(f.roots.is_empty());
         assert!(f.operations.is_empty());
         assert!(f.override_search.is_empty());
+    }
+
+    #[test]
+    fn atlas_config_file_default_serialises_without_empty_roots() {
+        // The default round-trips without an empty `roots: []` line.
+        // `roots` shares the skip-serialise hygiene already used by
+        // `override_search` and `operations`.
+        let original = AtlasConfigFile::default();
+        let yaml = serde_yaml::to_string(&original).unwrap();
+        assert!(
+            !yaml.contains("roots:"),
+            "default config must not emit a `roots:` line, got:\n{yaml}"
+        );
+        let parsed: AtlasConfigFile = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, original);
     }
 }

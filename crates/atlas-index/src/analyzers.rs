@@ -19,6 +19,11 @@ pub const ANALYZERS_SCHEMA_VERSION: u32 = 1;
 
 /// Which L-stage an analyser plugs into. Closed kebab-case enum so a
 /// typo in a YAML registry file fails loudly.
+///
+/// Variants serialise as lowercase strings (`l1`, `l2`, …, `l9`) to
+/// match the wire form used in `analyzers.yaml` (see design §6.6).
+/// `kebab-case` reduces to lowercase here because each variant is a
+/// single token without internal word breaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Stage {
@@ -444,6 +449,19 @@ version: 0.4.1
         let reemitted = serde_yaml::to_string(&parsed).unwrap();
         let reparsed: AnalyzerSpec = serde_yaml::from_str(&reemitted).unwrap();
         assert_eq!(reparsed, parsed);
+        // Pin the load-bearing field names from design §6.6 so a
+        // future serde rename drifting away from the wire form trips
+        // here rather than slipping through the round-trip identity.
+        assert!(
+            reemitted.contains("transport: subprocess"),
+            "design §6.6 wire form `transport: subprocess` missing:\n{reemitted}"
+        );
+        for field in ["subprocess:", "command:", "timeout_seconds:"] {
+            assert!(
+                reemitted.contains(field),
+                "design §6.6 field `{field}` missing from re-emitted YAML:\n{reemitted}"
+            );
+        }
     }
 
     #[test]
