@@ -133,14 +133,14 @@ fn overlap_fraction(prior: &HashSet<&str>, candidate: &HashSet<&str>) -> f32 {
 mod tests {
     use std::path::PathBuf;
 
-    use component_ontology::EvidenceGrade;
+    use component_ontology::{ComponentId, EvidenceGrade};
 
     use super::super::schema::{ComponentEntry, PathSegment};
     use super::*;
 
     fn entry_with_shas(id: &str, shas: &[&str]) -> ComponentEntry {
         ComponentEntry {
-            id: id.into(),
+            id: ComponentId::parse(id).unwrap(),
             parent: None,
             kind: "rust-library".into(),
             lifecycle_roles: vec![],

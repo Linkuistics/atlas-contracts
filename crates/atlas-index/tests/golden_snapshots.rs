@@ -15,7 +15,7 @@ use atlas_index::{
     ExternalsFile, OverridesFile, PathSegment, PinValue, COMPONENTS_SCHEMA_VERSION,
     EXTERNALS_SCHEMA_VERSION, OVERRIDES_SCHEMA_VERSION,
 };
-use component_ontology::{EvidenceGrade, LifecycleScope};
+use component_ontology::{ComponentId, EvidenceGrade, LifecycleScope};
 
 fn snapshot_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots")
@@ -41,8 +41,8 @@ fn check_snapshot(name: &str, actual: &str) {
 
 fn sample_component_entry() -> ComponentEntry {
     ComponentEntry {
-        id: "atlas/component-ontology".into(),
-        parent: Some("atlas".into()),
+        id: ComponentId::parse("atlas/component-ontology").unwrap(),
+        parent: Some(ComponentId::parse("atlas").unwrap()),
         kind: "rust-library".into(),
         lifecycle_roles: vec![LifecycleScope::Build, LifecycleScope::Design],
         language: Some("rust".into()),
@@ -93,7 +93,7 @@ fn components_yaml_golden_snapshot() {
 
 #[test]
 fn overrides_yaml_golden_snapshot() {
-    let mut pins: BTreeMap<String, BTreeMap<String, PinValue>> = BTreeMap::new();
+    let mut pins: BTreeMap<ComponentId, BTreeMap<String, PinValue>> = BTreeMap::new();
     let mut pinned = BTreeMap::new();
     pinned.insert(
         "role".into(),
@@ -105,7 +105,10 @@ fn overrides_yaml_golden_snapshot() {
     pinned.insert(
         "suppress_children".into(),
         PinValue::SuppressChildren {
-            suppress_children: vec!["atlas/old-crate".into(), "atlas/older-crate".into()],
+            suppress_children: vec![
+                ComponentId::parse("atlas/old-crate").unwrap(),
+                ComponentId::parse("atlas/older-crate").unwrap(),
+            ],
         },
     );
     pinned.insert(
@@ -114,7 +117,7 @@ fn overrides_yaml_golden_snapshot() {
             suppress: AlwaysTrue,
         },
     );
-    pins.insert("atlas".into(), pinned);
+    pins.insert(ComponentId::parse("atlas").unwrap(), pinned);
 
     let file = OverridesFile {
         schema_version: OVERRIDES_SCHEMA_VERSION,

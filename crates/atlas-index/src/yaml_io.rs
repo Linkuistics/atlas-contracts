@@ -236,7 +236,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use component_ontology::{EvidenceGrade, LifecycleScope};
+    use component_ontology::{ComponentId, EvidenceGrade, LifecycleScope};
     use tempfile::TempDir;
 
     use super::super::schema::{
@@ -249,7 +249,7 @@ mod tests {
 
     fn sample_component_entry() -> ComponentEntry {
         ComponentEntry {
-            id: "atlas".into(),
+            id: ComponentId::parse("atlas").unwrap(),
             parent: None,
             kind: "workspace".into(),
             lifecycle_roles: vec![LifecycleScope::Build],
@@ -288,7 +288,7 @@ mod tests {
     }
 
     fn sample_overrides_file() -> OverridesFile {
-        let mut pins: BTreeMap<String, BTreeMap<String, PinValue>> = BTreeMap::new();
+        let mut pins: BTreeMap<ComponentId, BTreeMap<String, PinValue>> = BTreeMap::new();
         let mut component_pins: BTreeMap<String, PinValue> = BTreeMap::new();
         component_pins.insert(
             "role".into(),
@@ -303,7 +303,10 @@ mod tests {
                 suppress: AlwaysTrue,
             },
         );
-        pins.insert("atlas/deprecated-crate".into(), component_pins);
+        pins.insert(
+            ComponentId::parse("atlas/deprecated-crate").unwrap(),
+            component_pins,
+        );
         OverridesFile {
             schema_version: OVERRIDES_SCHEMA_VERSION,
             pins,
@@ -367,12 +370,15 @@ mod tests {
         )
         .unwrap();
         let loaded = load_overrides(&path).unwrap();
-        let connector_pins = loaded.pins.get("connector-lib").expect("pin entry present");
+        let connector_pins = loaded
+            .pins
+            .get(&ComponentId::parse("connector-lib").unwrap())
+            .expect("pin entry present");
         match connector_pins.get("suppress_children") {
             Some(PinValue::SuppressChildren { suppress_children }) => {
                 assert_eq!(
                     suppress_children,
-                    &vec!["connector-lib/formats".to_string()]
+                    &vec![ComponentId::parse("connector-lib/formats").unwrap()]
                 );
             }
             other => panic!("expected SuppressChildren, got {other:?}"),

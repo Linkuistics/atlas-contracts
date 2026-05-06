@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use component_ontology::{EvidenceGrade, LifecycleScope};
+use component_ontology::{ComponentId, EvidenceGrade, LifecycleScope};
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -63,9 +63,9 @@ pub struct DocAnchor {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentEntry {
-    pub id: String,
+    pub id: ComponentId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
+    pub parent: Option<ComponentId>,
     pub kind: String,
     #[serde(default)]
     pub lifecycle_roles: Vec<LifecycleScope>,
@@ -129,7 +129,7 @@ pub enum PinValue {
         suppress: AlwaysTrue,
     },
     SuppressChildren {
-        suppress_children: Vec<String>,
+        suppress_children: Vec<ComponentId>,
     },
     Value {
         value: String,
@@ -212,8 +212,8 @@ impl<'de> Visitor<'de> for PinValueVisitor {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let mut items: Vec<String> = Vec::new();
-        while let Some(item) = seq.next_element::<String>()? {
+        let mut items: Vec<ComponentId> = Vec::new();
+        while let Some(item) = seq.next_element::<ComponentId>()? {
             items.push(item);
         }
         Ok(PinValue::SuppressChildren {
@@ -283,7 +283,7 @@ impl<'de> Visitor<'de> for PinValueVisitor {
                 })
             }
             Some("suppress_children") => {
-                let children: Vec<String> = map.next_value()?;
+                let children: Vec<ComponentId> = map.next_value()?;
                 if map.next_key::<String>()?.is_some() {
                     return Err(serde::de::Error::custom(
                         "`suppress_children` pin accepts only a single `suppress_children: [...]` field",
@@ -309,7 +309,7 @@ pub struct OverridesFile {
     /// (e.g., `"role"`, `"kind"`, `"deleted"`). `BTreeMap` keeps the
     /// serialised output deterministic.
     #[serde(default)]
-    pub pins: BTreeMap<String, BTreeMap<String, PinValue>>,
+    pub pins: BTreeMap<ComponentId, BTreeMap<String, PinValue>>,
     /// Components authored by hand when no evidence exists for them
     /// (e.g., a spec directory with no manifest). They bypass L2/L3 and
     /// land in `components.yaml` directly.
@@ -365,7 +365,7 @@ impl Default for SubsystemsOverridesFile {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemberEvidence {
-    pub id: String,
+    pub id: ComponentId,
     /// Glob string when the member resolved via a glob, the literal
     /// `"id"` when the member entry was an id form, or
     /// `"<glob> (no matches)"` when a glob produced zero matches.
@@ -385,7 +385,7 @@ pub struct SubsystemEntry {
     pub evidence_fields: Vec<String>,
     /// Resolved component ids, sorted and deduped.
     #[serde(default)]
-    pub members: Vec<String>,
+    pub members: Vec<ComponentId>,
     /// Audit trail: how each resolved member was matched.
     #[serde(default)]
     pub member_evidence: Vec<MemberEvidence>,
@@ -504,7 +504,10 @@ mod tests {
     #[test]
     fn pin_value_suppress_children_serialises_as_bare_sequence() {
         let pin = PinValue::SuppressChildren {
-            suppress_children: vec!["a".into(), "b".into()],
+            suppress_children: vec![
+                ComponentId::parse("a").unwrap(),
+                ComponentId::parse("b").unwrap(),
+            ],
         };
         let yaml = serde_yaml::to_string(&pin).unwrap();
         // Natural form: a YAML sequence at the root, no `suppress_children:` wrapper.
@@ -523,7 +526,10 @@ mod tests {
         assert_eq!(
             pin,
             PinValue::SuppressChildren {
-                suppress_children: vec!["a".into(), "b".into()]
+                suppress_children: vec![
+                    ComponentId::parse("a").unwrap(),
+                    ComponentId::parse("b").unwrap(),
+                ]
             }
         );
     }
@@ -534,7 +540,10 @@ mod tests {
         assert_eq!(
             pin,
             PinValue::SuppressChildren {
-                suppress_children: vec!["a".into(), "b".into()]
+                suppress_children: vec![
+                    ComponentId::parse("a").unwrap(),
+                    ComponentId::parse("b").unwrap(),
+                ]
             }
         );
     }
@@ -601,8 +610,8 @@ mod tests {
     #[test]
     fn component_entry_round_trips_through_yaml() {
         let entry = ComponentEntry {
-            id: "workspace/crate-a".into(),
-            parent: Some("workspace".into()),
+            id: ComponentId::parse("workspace/crate-a").unwrap(),
+            parent: Some(ComponentId::parse("workspace").unwrap()),
             kind: "rust-library".into(),
             lifecycle_roles: vec![LifecycleScope::Build, LifecycleScope::Runtime],
             language: Some("rust".into()),
@@ -686,14 +695,17 @@ mod tests {
             rationale: "x".into(),
             evidence_grade: EvidenceGrade::Strong,
             evidence_fields: vec![],
-            members: vec!["auth-service".into(), "identity-lib".into()],
+            members: vec![
+                ComponentId::parse("auth-service").unwrap(),
+                ComponentId::parse("identity-lib").unwrap(),
+            ],
             member_evidence: vec![
                 MemberEvidence {
-                    id: "auth-service".into(),
+                    id: ComponentId::parse("auth-service").unwrap(),
                     matched_via: "services/auth/*".into(),
                 },
                 MemberEvidence {
-                    id: "identity-lib".into(),
+                    id: ComponentId::parse("identity-lib").unwrap(),
                     matched_via: "libs/identity".into(),
                 },
             ],
@@ -707,7 +719,7 @@ mod tests {
     #[test]
     fn member_evidence_round_trips_through_yaml() {
         let m = MemberEvidence {
-            id: "x-component".into(),
+            id: ComponentId::parse("x-component").unwrap(),
             matched_via: "id".into(),
         };
         let yaml = serde_yaml::to_string(&m).unwrap();

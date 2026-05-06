@@ -39,6 +39,7 @@ pub use yaml_io::{
 // owner. Re-export the surface that consumers need.
 pub use component_ontology::{
     load as load_related_components, load_or_default as load_or_default_related_components,
-    save_atomic as save_related_components_atomic, Edge, EdgeKind, EvidenceGrade, LifecycleScope,
-    RelatedComponentsFile, SCHEMA_VERSION as RELATED_COMPONENTS_SCHEMA_VERSION,
+    save_atomic as save_related_components_atomic, ComponentId, ComponentIdError, Edge, EdgeKind,
+    EvidenceGrade, LifecycleScope, RelatedComponentsFile,
+    SCHEMA_VERSION as RELATED_COMPONENTS_SCHEMA_VERSION,
 };
