@@ -64,8 +64,9 @@ impl ComponentId {
     }
 
     pub fn child(&self, leaf: &str) -> Result<ComponentId, ComponentIdError> {
-        validate_segment(leaf, 0, leaf)?;
-        Ok(ComponentId(format!("{}/{leaf}", self.0)))
+        let full = format!("{}/{leaf}", self.0);
+        validate_segment(leaf, /* index */ 1, &full)?;
+        Ok(ComponentId(full))
     }
 
     pub fn is_descendant_of(&self, ancestor: &ComponentId) -> bool {
@@ -75,8 +76,7 @@ impl ComponentId {
             .unwrap_or(false)
     }
 
-    /// First segment — the workspace-root component for ids allocated
-    /// by `atlas-engine::identifiers`.
+    /// First path segment.
     pub fn root(&self) -> &str {
         self.0.split('/').next().expect("non-empty by construction")
     }
@@ -267,5 +267,30 @@ mod tests {
     fn yaml_rejects_invalid_string() {
         let err = serde_yaml::from_str::<ComponentId>("Bad/Name").unwrap_err();
         assert!(err.to_string().contains("component id"));
+    }
+
+    #[test]
+    fn parses_single_char_segment() {
+        let id = ComponentId::parse("a").unwrap();
+        assert_eq!(id.as_str(), "a");
+    }
+
+    #[test]
+    fn parses_all_digit_segment() {
+        let id = ComponentId::parse("123").unwrap();
+        assert_eq!(id.as_str(), "123");
+    }
+
+    #[test]
+    fn child_chains() {
+        let p = ComponentId::parse("a").unwrap();
+        let chained = p.child("b").unwrap().child("c").unwrap();
+        assert_eq!(chained.as_str(), "a/b/c");
+    }
+
+    #[test]
+    fn from_segments_empty_iterator_is_empty_error() {
+        let r: Result<ComponentId, _> = ComponentId::from_segments::<[&str; 0], &str>([]);
+        assert_eq!(r, Err(ComponentIdError::Empty));
     }
 }
