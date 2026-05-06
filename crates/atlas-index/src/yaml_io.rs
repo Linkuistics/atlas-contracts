@@ -463,6 +463,40 @@ mod tests {
     }
 
     #[test]
+    fn overrides_load_rejects_invalid_component_id_as_pin_key() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("components.overrides.yaml");
+        std::fs::write(
+            &path,
+            "schema_version: 1\npins:\n  Bad/Name:\n    kind: {value: library}\n",
+        )
+        .unwrap();
+        let err = load_overrides(&path).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("component id"),
+            "expected component id error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn overrides_load_rejects_invalid_component_id_in_suppress_children() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("components.overrides.yaml");
+        std::fs::write(
+            &path,
+            "schema_version: 1\npins:\n  my-crate:\n    suppress_children: [Bad/Name]\n",
+        )
+        .unwrap();
+        let err = load_overrides(&path).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("component id"),
+            "expected component id error, got: {msg}"
+        );
+    }
+
+    #[test]
     fn save_atomic_never_leaves_temp_file_behind() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("components.yaml");

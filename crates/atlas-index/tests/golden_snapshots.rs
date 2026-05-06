@@ -11,11 +11,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use atlas_index::{
-    AlwaysTrue, CacheFingerprints, ComponentEntry, ComponentsFile, DocAnchor, ExternalEntry,
-    ExternalsFile, OverridesFile, PathSegment, PinValue, COMPONENTS_SCHEMA_VERSION,
+    AlwaysTrue, CacheFingerprints, ComponentEntry, ComponentId, ComponentsFile, DocAnchor,
+    ExternalEntry, ExternalsFile, OverridesFile, PathSegment, PinValue, COMPONENTS_SCHEMA_VERSION,
     EXTERNALS_SCHEMA_VERSION, OVERRIDES_SCHEMA_VERSION,
 };
-use component_ontology::{ComponentId, EvidenceGrade, LifecycleScope};
+use component_ontology::{EvidenceGrade, LifecycleScope};
 
 fn snapshot_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots")
