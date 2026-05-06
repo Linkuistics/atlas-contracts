@@ -365,7 +365,15 @@ impl Default for SubsystemsOverridesFile {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemberEvidence {
-    pub id: ComponentId,
+    /// The source member entry's role here is dual: when `matched_via`
+    /// indicates a successful resolution (`"id"` or a glob string),
+    /// `id` carries the resolved component id. When `matched_via`
+    /// indicates a resolution failure (`"<glob> (no matches)"`,
+    /// `"invalid glob"`, `"no such component"`, etc.), `id` carries
+    /// the raw source member string verbatim. Kept as `String` so a
+    /// failed resolution can still be recorded faithfully — this field
+    /// is an audit log entry, not a join key.
+    pub id: String,
     /// Glob string when the member resolved via a glob, the literal
     /// `"id"` when the member entry was an id form, or
     /// `"<glob> (no matches)"` when a glob produced zero matches.
@@ -701,11 +709,11 @@ mod tests {
             ],
             member_evidence: vec![
                 MemberEvidence {
-                    id: ComponentId::parse("auth-service").unwrap(),
+                    id: "auth-service".into(),
                     matched_via: "services/auth/*".into(),
                 },
                 MemberEvidence {
-                    id: ComponentId::parse("identity-lib").unwrap(),
+                    id: "identity-lib".into(),
                     matched_via: "libs/identity".into(),
                 },
             ],
@@ -719,7 +727,7 @@ mod tests {
     #[test]
     fn member_evidence_round_trips_through_yaml() {
         let m = MemberEvidence {
-            id: ComponentId::parse("x-component").unwrap(),
+            id: "x-component".into(),
             matched_via: "id".into(),
         };
         let yaml = serde_yaml::to_string(&m).unwrap();
