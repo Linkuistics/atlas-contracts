@@ -111,10 +111,12 @@ pub struct Contract {
     /// convention.
     pub id: String,
     pub kind: ContractKind,
-    /// Content sha of the canonical contract definition (see the
-    /// companion content-sha canonicalisation spec for the per-source
-    /// algorithm).
-    pub content_sha: String,
+    /// On-disk field name is `fingerprint:` (per design §6.3 YAML
+    /// schema); the value is the contract's content sha computed per
+    /// `2026-05-06-contract-content-sha-canonicalisation.md`. Bindings
+    /// keep their separate `content_sha` field — the contract's
+    /// equivalent is renamed to `fingerprint` to match the design.
+    pub fingerprint: String,
     /// The defining binding: the language-bound projection from which
     /// the contract was derived.
     pub definition_binding: Binding,
@@ -246,7 +248,7 @@ mod tests {
         Contract {
             id: "atlas-contracts/components-yaml-schema".into(),
             kind: ContractKind::DataFormat,
-            content_sha: "fedcba9876543210".repeat(4),
+            fingerprint: "fedcba9876543210".repeat(4),
             definition_binding: sample_binding(),
             description: "On-disk YAML schema for components.yaml.".into(),
         }
@@ -313,8 +315,53 @@ mod tests {
     fn contract_round_trips_through_yaml() {
         let original = sample_contract();
         let yaml = serde_yaml::to_string(&original).unwrap();
+        // Design §6.3 prescribes the on-disk field name `fingerprint:`
+        // for the contract's content sha. The defining binding still
+        // uses `content_sha:` (binding's field name is correct).
+        assert!(
+            yaml.contains("fingerprint:"),
+            "expected `fingerprint:` field, got:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("\ncontent_sha: fedcba"),
+            "Contract must not emit a top-level `content_sha:` field; got:\n{yaml}"
+        );
         let parsed: Contract = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn contract_yaml_matches_design_section_6_3_field_names() {
+        // Verbatim subset of the design §6.3 example, with concrete
+        // sha hex placeholders. Asserts that the field shape on disk
+        // is exactly what the spec prescribes.
+        let yaml = r#"
+id: atlas-contracts/components-yaml-schema
+kind: data-format
+fingerprint: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+definition_binding:
+  language: rust
+  symbol: ComponentEntry
+  file: src/schema.rs
+  span: [69, 95]
+  content_sha: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+description: |
+  The on-disk YAML schema for .atlas/components.yaml.
+"#;
+        let parsed: Contract = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(parsed.id, "atlas-contracts/components-yaml-schema");
+        assert_eq!(parsed.kind, ContractKind::DataFormat);
+        assert_eq!(
+            parsed.fingerprint,
+            "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+        );
+        assert_eq!(parsed.definition_binding.language, "rust");
+        assert_eq!(parsed.definition_binding.symbol, "ComponentEntry");
+        assert_eq!(parsed.definition_binding.span, (69, 95));
+        // Round-trip preserves the same shape.
+        let reemitted = serde_yaml::to_string(&parsed).unwrap();
+        let reparsed: Contract = serde_yaml::from_str(&reemitted).unwrap();
+        assert_eq!(reparsed, parsed);
     }
 
     #[test]

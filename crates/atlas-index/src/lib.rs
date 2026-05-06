@@ -23,8 +23,8 @@ pub mod surfaces;
 pub mod yaml_io;
 
 pub use analyzers::{
-    AnalyzerSpec, AnalyzersFile, ApplicabilityPredicate, Confidence, CostClass, Stage, Transport,
-    ANALYZERS_SCHEMA_VERSION,
+    AnalyzerSpec, AnalyzerSpecValidationError, AnalyzersFile, ApplicabilityPredicate, Confidence,
+    CostClass, Stage, SubprocessConfig, Transport, ANALYZERS_SCHEMA_VERSION,
 };
 pub use config::{AtlasConfigFile, ModelRouting, CONFIG_SCHEMA_VERSION};
 pub use per_component::{PerComponentFile, PER_COMPONENT_SCHEMA_VERSION};

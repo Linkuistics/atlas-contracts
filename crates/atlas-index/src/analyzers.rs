@@ -66,21 +66,33 @@ pub enum Confidence {
 /// Process-boundary transport for the analyser. Phase 1 ships only
 /// `in-process`; Phase 2 adds `subprocess` for crash isolation
 /// (design §5.2, §7.2).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "transport", rename_all = "kebab-case")]
+///
+/// On disk this is a plain kebab-case scalar (`transport: in-process`
+/// or `transport: subprocess`); the subprocess command/timeout live
+/// under a sibling `subprocess:` map on the `AnalyzerSpec`, per the
+/// design §6.6 example. See [`SubprocessConfig`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Transport {
     /// Rust trait object inside the engine process.
     InProcess,
     /// Spawned subprocess speaking line-delimited JSON over stdio
-    /// (design §7.2).
-    Subprocess {
-        /// argv of the subprocess (analyser binary + args). Resolved
-        /// against `$PATH` and the workspace `override_search`.
-        command: Vec<String>,
-        /// Hard timeout per request.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        timeout_seconds: Option<u32>,
-    },
+    /// (design §7.2). Configuration is carried in
+    /// [`AnalyzerSpec::subprocess`].
+    Subprocess,
+}
+
+/// Subprocess transport configuration — appears as a sibling
+/// `subprocess:` map on an [`AnalyzerSpec`] when (and only when) its
+/// `transport` is [`Transport::Subprocess`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubprocessConfig {
+    /// argv of the subprocess (analyser binary + args). Resolved
+    /// against `$PATH` and the workspace `override_search`.
+    pub command: Vec<String>,
+    /// Hard timeout per request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u32>,
 }
 
 /// Applicability predicate for an analyser. Phase 1 supports four
@@ -132,16 +144,66 @@ pub struct AnalyzerSpec {
     /// whose semantics include `declines`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<Confidence>,
-    /// Process boundary (in-process or subprocess). Flattened into
-    /// the spec so the YAML reads naturally:
-    /// `transport: in-process` or `transport: subprocess` plus
-    /// `command:` / `timeout_seconds:`.
-    #[serde(flatten)]
+    /// Process boundary (in-process or subprocess). Emitted as
+    /// `transport: in-process` or `transport: subprocess`. The
+    /// subprocess configuration lives under the sibling
+    /// [`AnalyzerSpec::subprocess`] map (design §6.6 example).
     pub transport: Transport,
+    /// Subprocess configuration. Required when `transport: subprocess`,
+    /// must be absent when `transport: in-process`. See
+    /// [`AnalyzerSpec::validate`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subprocess: Option<SubprocessConfig>,
     /// Analyser version string. Free-form; the dispatcher includes
     /// this in cache fingerprints so a version bump invalidates
     /// cached outputs.
     pub version: String,
+}
+
+/// Reasons an [`AnalyzerSpec`] can be semantically inconsistent.
+/// The on-disk format permits the inconsistency to be expressed
+/// (`transport: in-process` with a stray `subprocess:` map, or
+/// `transport: subprocess` with no map); validation is a runtime
+/// check on top of `serde`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnalyzerSpecValidationError {
+    /// `transport: subprocess` but `subprocess:` map is absent.
+    SubprocessConfigMissing,
+    /// `transport: in-process` but `subprocess:` map is present.
+    SubprocessConfigUnexpected,
+}
+
+impl std::fmt::Display for AnalyzerSpecValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SubprocessConfigMissing => f.write_str(
+                "analyzer spec has `transport: subprocess` but no `subprocess:` config map",
+            ),
+            Self::SubprocessConfigUnexpected => f.write_str(
+                "analyzer spec has `transport: in-process` but a `subprocess:` config map is set",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AnalyzerSpecValidationError {}
+
+impl AnalyzerSpec {
+    /// Cross-check `transport` against `subprocess`. The on-disk
+    /// schema deliberately keeps these as independent fields (so the
+    /// YAML reads naturally per design §6.6); this method enforces
+    /// the constraint that links them.
+    pub fn validate(&self) -> Result<(), AnalyzerSpecValidationError> {
+        match (self.transport, self.subprocess.is_some()) {
+            (Transport::Subprocess, false) => {
+                Err(AnalyzerSpecValidationError::SubprocessConfigMissing)
+            }
+            (Transport::InProcess, true) => {
+                Err(AnalyzerSpecValidationError::SubprocessConfigUnexpected)
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 /// Top-level shape of `<output>/.atlas/analyzers.yaml`.
@@ -182,6 +244,7 @@ mod tests {
             cost_class: CostClass::DeterministicCheap,
             confidence: None,
             transport: Transport::InProcess,
+            subprocess: None,
             version: "1.0.3".into(),
         }
     }
@@ -196,10 +259,11 @@ mod tests {
             },
             cost_class: CostClass::DeterministicExpensive,
             confidence: Some(Confidence::Binary),
-            transport: Transport::Subprocess {
+            transport: Transport::Subprocess,
+            subprocess: Some(SubprocessConfig {
                 command: vec!["rust-analyzer-surface".into(), "--stage=L5".into()],
                 timeout_seconds: Some(60),
-            },
+            }),
             version: "0.4.1".into(),
         }
     }
@@ -215,6 +279,7 @@ mod tests {
             cost_class: CostClass::LlmCheap,
             confidence: Some(Confidence::Declines),
             transport: Transport::InProcess,
+            subprocess: None,
             version: "1.0.0".into(),
         }
     }
@@ -302,23 +367,113 @@ mod tests {
     }
 
     #[test]
-    fn transport_in_process_serialises_with_kebab_case_tag() {
-        let yaml = serde_yaml::to_string(&Transport::InProcess).unwrap();
-        assert!(yaml.contains("transport: in-process"), "got:\n{yaml}");
-        let parsed: Transport = serde_yaml::from_str(&yaml).unwrap();
-        assert_eq!(parsed, Transport::InProcess);
+    fn transport_serialises_as_kebab_case_scalar() {
+        for (value, expected) in [
+            (Transport::InProcess, "in-process"),
+            (Transport::Subprocess, "subprocess"),
+        ] {
+            let yaml = serde_yaml::to_string(&value).unwrap();
+            assert_eq!(yaml.trim(), expected);
+            let parsed: Transport = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(parsed, value);
+        }
     }
 
     #[test]
-    fn transport_subprocess_round_trips() {
-        let original = Transport::Subprocess {
-            command: vec!["bin".into(), "--flag".into()],
-            timeout_seconds: Some(30),
-        };
-        let yaml = serde_yaml::to_string(&original).unwrap();
+    fn analyzer_spec_subprocess_emits_nested_subprocess_map() {
+        // Design §6.6 requires the subprocess transport's command and
+        // timeout to live under a nested `subprocess:` map, not at
+        // the top level of the analyser spec.
+        let spec = sample_subprocess_spec();
+        let yaml = serde_yaml::to_string(&spec).unwrap();
         assert!(yaml.contains("transport: subprocess"), "got:\n{yaml}");
-        let parsed: Transport = serde_yaml::from_str(&yaml).unwrap();
-        assert_eq!(parsed, original);
+        assert!(yaml.contains("subprocess:"), "got:\n{yaml}");
+        // command and timeout_seconds must NOT appear at AnalyzerSpec
+        // top level (i.e. unindented). The nested form indents them
+        // under `subprocess:`. Each top-level key starts at column 0
+        // followed by ':'.
+        for line in yaml.lines() {
+            assert!(
+                !line.starts_with("command:"),
+                "`command` must be nested under subprocess:, got top-level line `{line}`"
+            );
+            assert!(
+                !line.starts_with("timeout_seconds:"),
+                "`timeout_seconds` must be nested under subprocess:, got top-level line `{line}`"
+            );
+        }
+        let parsed: AnalyzerSpec = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn analyzer_spec_in_process_omits_subprocess_field() {
+        let spec = sample_in_process_spec();
+        let yaml = serde_yaml::to_string(&spec).unwrap();
+        assert!(yaml.contains("transport: in-process"), "got:\n{yaml}");
+        assert!(
+            !yaml.contains("subprocess"),
+            "in-process spec must not emit subprocess:, got:\n{yaml}"
+        );
+    }
+
+    #[test]
+    fn analyzer_spec_loads_design_section_6_6_rust_analyzer_surface() {
+        // Verbatim subset of the design §6.6 example for
+        // `rust-analyzer-surface`. The version field is included so
+        // the parsed value reaches structural equality with the
+        // sample fixture.
+        let yaml = r#"
+id: rust-analyzer-surface
+stage: l5
+applicability:
+  languages: [rust]
+cost_class: deterministic-expensive
+confidence: binary
+transport: subprocess
+subprocess:
+  command: [rust-analyzer-surface, --stage=L5]
+  timeout_seconds: 60
+version: 0.4.1
+"#;
+        let parsed: AnalyzerSpec = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(parsed, sample_subprocess_spec());
+        parsed.validate().unwrap();
+
+        // Round-trip preserves the same shape.
+        let reemitted = serde_yaml::to_string(&parsed).unwrap();
+        let reparsed: AnalyzerSpec = serde_yaml::from_str(&reemitted).unwrap();
+        assert_eq!(reparsed, parsed);
+    }
+
+    #[test]
+    fn analyzer_spec_validate_accepts_consistent_pairs() {
+        sample_in_process_spec().validate().unwrap();
+        sample_subprocess_spec().validate().unwrap();
+        sample_llm_fallback_spec().validate().unwrap();
+    }
+
+    #[test]
+    fn analyzer_spec_validate_rejects_subprocess_without_config() {
+        let mut spec = sample_subprocess_spec();
+        spec.subprocess = None;
+        assert_eq!(
+            spec.validate().unwrap_err(),
+            AnalyzerSpecValidationError::SubprocessConfigMissing
+        );
+    }
+
+    #[test]
+    fn analyzer_spec_validate_rejects_in_process_with_config() {
+        let mut spec = sample_in_process_spec();
+        spec.subprocess = Some(SubprocessConfig {
+            command: vec!["x".into()],
+            timeout_seconds: None,
+        });
+        assert_eq!(
+            spec.validate().unwrap_err(),
+            AnalyzerSpecValidationError::SubprocessConfigUnexpected
+        );
     }
 
     #[test]
