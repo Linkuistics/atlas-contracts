@@ -10,6 +10,7 @@ repository.workspace = true
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
+thiserror = "2.0.18"
 
 [dev-dependencies]
 regex = { workspace = true }

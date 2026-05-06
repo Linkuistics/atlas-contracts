@@ -14,10 +14,12 @@
 //! without dragging host concepts along.
 
 pub mod cli;
+pub mod component_id;
 pub mod defaults;
 pub mod schema;
 pub mod yaml_io;
 
+pub use component_id::{ComponentId, ComponentIdError};
 pub use defaults::{
     parse as parse_ontology_yaml, parse_embedded as parse_embedded_ontology_yaml,
     render_embedded_kinds_for_prompt, render_kinds_for_prompt, EMBEDDED_ONTOLOGY_YAML,
