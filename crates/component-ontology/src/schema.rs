@@ -388,6 +388,74 @@ impl RelatedComponentsFile {
     }
 }
 
+/// A single unresolved contract participant found by
+/// [`validate_contract_participants_resolve`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedContractParticipant {
+    /// The contract-family edge kind that carried the unresolved
+    /// participant.
+    pub edge_kind: EdgeKind,
+    /// `participants[0]` — the component that owns the relationship.
+    pub component_participant: String,
+    /// `participants[1]` — the contract id that could not be resolved
+    /// to any defining component.
+    pub unresolved_contract_id: String,
+}
+
+/// Walk every edge with a contract-family kind (`defines-contract`,
+/// `implements-contract`, `consumes-contract`) and assert that each
+/// contract participant (`participants[1]`) appears in
+/// `known_contract_ids`. On success returns `Ok(())`; on failure
+/// returns the sorted list of unresolved participants so the caller can
+/// format a useful error message.
+///
+/// The function is purely structural — it does not depend on
+/// `atlas-index`, so it can be called from any layer without creating
+/// a circular dependency.
+///
+/// Sort order: `(edge_kind.as_str(), unresolved_contract_id)` —
+/// deterministic for stable error messages across runs.
+pub fn validate_contract_participants_resolve(
+    edges: &[Edge],
+    known_contract_ids: &std::collections::BTreeSet<&str>,
+) -> Result<(), Vec<UnresolvedContractParticipant>> {
+    let mut unresolved: Vec<UnresolvedContractParticipant> = Vec::new();
+    for edge in edges {
+        let is_contract_kind = matches!(
+            edge.kind,
+            EdgeKind::DefinesContract | EdgeKind::ImplementsContract | EdgeKind::ConsumesContract
+        );
+        if !is_contract_kind {
+            continue;
+        }
+        // Participant layout: [component_id, contract_id].
+        // `Edge::validate` guarantees exactly two participants, but
+        // be defensive with `.get` in case this is called on an
+        // unvalidated slice.
+        let Some(contract_id) = edge.participants.get(1) else {
+            continue;
+        };
+        let Some(component_id) = edge.participants.first() else {
+            continue;
+        };
+        if !known_contract_ids.contains(contract_id.as_str()) {
+            unresolved.push(UnresolvedContractParticipant {
+                edge_kind: edge.kind,
+                component_participant: component_id.clone(),
+                unresolved_contract_id: contract_id.clone(),
+            });
+        }
+    }
+    if unresolved.is_empty() {
+        return Ok(());
+    }
+    unresolved.sort_by(|a, b| {
+        (a.edge_kind.as_str(), a.unresolved_contract_id.as_str())
+            .cmp(&(b.edge_kind.as_str(), b.unresolved_contract_id.as_str()))
+    });
+    Err(unresolved)
+}
+
 /// Verify that no id appears in both component and subsystem namespaces.
 /// Edge participants (`Edge::participants: Vec<String>`) are opaque
 /// strings; collision-free namespaces guarantee unambiguous resolution.
@@ -722,5 +790,86 @@ mod tests {
         let parsed: RelatedComponentsFile = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed, file);
         assert_eq!(parsed.schema_version, SCHEMA_VERSION);
+    }
+
+    // ---- validate_contract_participants_resolve tests ---------------
+
+    fn consumes_contract_edge(component: &str, contract: &str) -> Edge {
+        Edge {
+            kind: EdgeKind::ConsumesContract,
+            lifecycle: LifecycleScope::Design,
+            participants: vec![component.into(), contract.into()],
+            evidence_grade: EvidenceGrade::Strong,
+            evidence_fields: vec!["surfaces.yaml:contracts_consumed".into()],
+            rationale: format!("component `{component}` consumes contract `{contract}`"),
+        }
+    }
+
+    fn defines_contract_edge(component: &str, contract: &str) -> Edge {
+        Edge {
+            kind: EdgeKind::DefinesContract,
+            lifecycle: LifecycleScope::Design,
+            participants: vec![component.into(), contract.into()],
+            evidence_grade: EvidenceGrade::Strong,
+            evidence_fields: vec!["surfaces.yaml:contracts_defined".into()],
+            rationale: format!("component `{component}` defines contract `{contract}`"),
+        }
+    }
+
+    #[test]
+    fn validate_contract_participants_ok_when_all_resolve() {
+        let edges = vec![defines_contract_edge("crate-a", "crate-a/contract-x")];
+        let known: std::collections::BTreeSet<&str> =
+            ["crate-a/contract-x"].iter().copied().collect();
+        assert!(
+            validate_contract_participants_resolve(&edges, &known).is_ok(),
+            "all ids known → should be Ok"
+        );
+    }
+
+    #[test]
+    fn validate_contract_participants_err_on_unresolved_consumes_contract() {
+        let edges = vec![consumes_contract_edge("crate-b", "nonexistent/contract")];
+        let known: std::collections::BTreeSet<&str> = Default::default();
+        let err = validate_contract_participants_resolve(&edges, &known).unwrap_err();
+        assert_eq!(err.len(), 1);
+        assert_eq!(err[0].edge_kind, EdgeKind::ConsumesContract);
+        assert_eq!(err[0].component_participant, "crate-b");
+        assert_eq!(err[0].unresolved_contract_id, "nonexistent/contract");
+    }
+
+    #[test]
+    fn validate_contract_participants_ignores_non_contract_edges() {
+        // A regular depends-on edge should never trigger the validator.
+        let edges = vec![strong_edge(
+            EdgeKind::DependsOn,
+            LifecycleScope::Build,
+            "A",
+            "B",
+        )];
+        let known: std::collections::BTreeSet<&str> = Default::default();
+        assert!(
+            validate_contract_participants_resolve(&edges, &known).is_ok(),
+            "non-contract edges should not be checked"
+        );
+    }
+
+    #[test]
+    fn validate_contract_participants_sorted_by_kind_then_contract_id() {
+        let edges = vec![
+            consumes_contract_edge("crate-b", "zzz/contract"),
+            consumes_contract_edge("crate-b", "aaa/contract"),
+            defines_contract_edge("crate-a", "bbb/contract"),
+        ];
+        let known: std::collections::BTreeSet<&str> = Default::default();
+        let err = validate_contract_participants_resolve(&edges, &known).unwrap_err();
+        // Sort order: (kind.as_str(), contract_id).
+        // "consumes-contract" < "defines-contract".
+        // Within "consumes-contract": "aaa/contract" < "zzz/contract".
+        assert_eq!(err.len(), 3);
+        assert_eq!(err[0].unresolved_contract_id, "aaa/contract");
+        assert_eq!(err[1].unresolved_contract_id, "zzz/contract");
+        assert_eq!(err[2].unresolved_contract_id, "bbb/contract");
+        assert_eq!(err[2].edge_kind, EdgeKind::DefinesContract);
     }
 }
