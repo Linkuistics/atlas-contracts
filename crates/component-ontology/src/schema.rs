@@ -855,6 +855,39 @@ mod tests {
     }
 
     #[test]
+    fn validate_contract_participants_ok_on_empty_edges() {
+        // An empty edge slice must return Ok(()) without panicking.
+        // Pins the no-crash invariant for the boundary case.
+        let known: std::collections::BTreeSet<&str> = Default::default();
+        assert!(
+            validate_contract_participants_resolve(&[], &known).is_ok(),
+            "empty edges vec must return Ok(())"
+        );
+    }
+
+    #[test]
+    fn validate_contract_participants_skips_malformed_edge_with_one_participant() {
+        // An edge with `participants.len() != 2` is malformed. The
+        // defensive `.get(1)` / `.first()` branches inside the validator
+        // silently skip it — no panic, no false-positive unresolved.
+        let edge = Edge {
+            kind: EdgeKind::ConsumesContract,
+            lifecycle: LifecycleScope::Design,
+            participants: vec!["only-one".into()],
+            evidence_grade: EvidenceGrade::Strong,
+            evidence_fields: vec!["only-one.consumes".into()],
+            rationale: "malformed — only one participant".into(),
+        };
+        // `known_contract_ids` is empty so the contract id would
+        // definitely be flagged if the validator didn't skip the edge.
+        let known: std::collections::BTreeSet<&str> = Default::default();
+        assert!(
+            validate_contract_participants_resolve(&[edge], &known).is_ok(),
+            "malformed edge (participants.len() != 2) must be skipped silently, not flagged"
+        );
+    }
+
+    #[test]
     fn validate_contract_participants_sorted_by_kind_then_contract_id() {
         let edges = vec![
             consumes_contract_edge("crate-b", "zzz/contract"),
